@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS items (
     is_read         INTEGER NOT NULL DEFAULT 0,
     UNIQUE(feed_id, guid_hash)
 );
+
+CREATE INDEX IF NOT EXISTS idx_items_published ON items(published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_items_unread ON items(is_read, published_at DESC);
 "#;
 
 pub fn apply(conn: &Connection) -> Result<()> {
