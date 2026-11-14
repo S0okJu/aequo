@@ -22,7 +22,7 @@
 
 ## M1. Data Model & DB Layer
 
-- [ ] Write the `feeds` and `items` table schemas (as in ARCHITECTURE.md Chapter 5)
+- [x] Write the `feeds` and `items` table schemas (as in ARCHITECTURE.md Chapter 5)
 - [ ] Create indexes: `idx_items_published`, `idx_items_unread`
 - [ ] SQLite connection init module — enable WAL mode, create the DB file in the app data directory
 - [ ] Decide on a migration approach (plain `CREATE TABLE IF NOT EXISTS` vs. versioned migrations)
