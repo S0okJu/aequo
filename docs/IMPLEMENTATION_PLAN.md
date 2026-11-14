@@ -65,7 +65,7 @@
 - [x] Exponential backoff retry queue (1min → 5min → 30min, capped at the feed's base interval)
 - [x] Confirm network errors/timeouts don't block the overall polling cycle (one feed's failure doesn't affect others)
 - [x] On parse errors, skip only that cycle and retry on the next poll
-- [ ] Unit tests: backoff interval calculation function
+- [x] Unit tests: backoff interval calculation function
 
 ## M6. Frontend ↔ Backend Communication (event-based)
 
