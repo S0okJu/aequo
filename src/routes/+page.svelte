@@ -1,12 +1,41 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
   import FeedList from '$lib/components/FeedList.svelte';
   import Timeline from '$lib/components/Timeline.svelte';
   import DetailView from '$lib/components/DetailView.svelte';
+  import { listFeeds } from '$lib/api';
+  import type { FeedSummary } from '$lib/types';
+
+  interface FeedUpdatedPayload {
+    feedId: number;
+    newItemCount: number;
+  }
+
+  let feeds = $state<FeedSummary[]>([]);
+  let selectedFeedId = $state<number | null>(null);
+
+  async function refreshFeeds() {
+    feeds = await listFeeds();
+  }
+
+  onMount(() => {
+    refreshFeeds();
+
+    // Event-driven only (§3.2/§6.2) - no polling timer anywhere here.
+    const unlisten = listen<FeedUpdatedPayload>('feed-updated', () => {
+      refreshFeeds();
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  });
 </script>
 
 <div class="layout">
   <aside class="pane feed-list-pane">
-    <FeedList />
+    <FeedList {feeds} {selectedFeedId} onSelect={(feedId) => (selectedFeedId = feedId)} />
   </aside>
   <main class="pane timeline-pane">
     <Timeline />

@@ -9,15 +9,22 @@ export default [
   ...svelte.configs['flat/recommended'],
   prettier,
   {
-    files: ['**/*.ts'],
-    languageOptions: {
-      parser: tsParser,
-    },
+    files: ['**/*.ts', '**/*.svelte'],
     plugins: {
       '@typescript-eslint': tsPlugin,
     },
     rules: {
       ...tsPlugin.configs.recommended.rules,
+      // Base no-unused-vars doesn't understand TS type-signature
+      // parameter names (e.g. an interface method's param); the
+      // typescript-eslint version does.
+      'no-unused-vars': 'off',
+    },
+  },
+  {
+    files: ['**/*.ts'],
+    languageOptions: {
+      parser: tsParser,
     },
   },
   {
