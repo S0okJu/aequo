@@ -86,7 +86,7 @@
 - Distinguish read/unread by contrast, weight, or a dot — not color — and avoid excessive badges/count bubbles
 - Dark mode is out of v1 scope (Chapter 13), but avoid hardcoding colors — structure them as CSS variables/tokens so the system can adapt to light/dark naturally and dark mode can be added later by swapping color tokens, with no layout changes
 
-- [ ] 3-pane layout: feed list / merged timeline / detail view
+- [x] 3-pane layout: feed list / merged timeline / detail view
 - [ ] Feed list: "All" + per-feed unread count (`COUNT(*) WHERE is_read = 0`)
 - [ ] Timeline: sorted by `published_at DESC`, visually distinguishing unread (bold/dot) from read (dimmed)
 - [ ] Apply virtual scrolling — keep DOM node count bounded when rendering thousands of items
@@ -119,7 +119,7 @@
 
 - [ ] Confirm `tauri build` produces a working `.app`/`.dmg`
 - [ ] Confirm the app icon (generated from `img/logo.png` in M0) appears correctly in the built `.app`/`.dmg`
-- [ ] Developer ID signing + notarization (to pass Gatekeeper)
+
 - [ ] (Optional) Decide whether to adopt the Tauri Updater plugin — fine to defer past v1
 
 ---
