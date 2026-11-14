@@ -38,3 +38,17 @@ pub struct NewItem {
     pub published_at: i64,
     pub fetched_at: i64,
 }
+
+/// The subset of `Feed` columns a fetch worker needs to run a
+/// conditional request and reschedule the feed (see
+/// docs/ARCHITECTURE.md §4.1). A narrower projection than `Feed` so the
+/// hot polling path isn't fetching title/summary-irrelevant columns.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FeedMeta {
+    pub id: i64,
+    pub url: String,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    pub interval_secs: i64,
+    pub next_fetch_at: i64,
+}

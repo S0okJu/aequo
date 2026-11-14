@@ -42,7 +42,7 @@
 
 ## M3. Conditional Requests & Fetch Workers (core efficiency work)
 
-- [ ] `FeedMeta` struct (`etag`, `last_modified`, `interval_secs`, `next_fetch_at`) mapped to DB columns
+- [x] `FeedMeta` struct (`etag`, `last_modified`, `interval_secs`, `next_fetch_at`) mapped to DB columns
 - [ ] Apply conditional requests: set `If-None-Match` / `If-Modified-Since` headers on each request
 - [ ] Response handling branches
   - [ ] `304 Not Modified` → exit immediately with no body download/parsing, update only `next_fetch_at`

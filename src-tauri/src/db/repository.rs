@@ -3,7 +3,7 @@
 
 use rusqlite::{Connection, OptionalExtension, Result, params};
 
-use super::models::{Feed, Item, NewItem};
+use super::models::{Feed, FeedMeta, Item, NewItem};
 
 pub fn insert_feed(
     conn: &Connection,
@@ -49,6 +49,61 @@ pub fn list_feeds(conn: &Connection) -> Result<Vec<Feed>> {
     let mut stmt = conn.prepare(&format!("SELECT {FEED_COLUMNS} FROM feeds ORDER BY id"))?;
     let rows = stmt.query_map([], row_to_feed)?;
     rows.collect()
+}
+
+fn row_to_feed_meta(row: &rusqlite::Row) -> rusqlite::Result<FeedMeta> {
+    Ok(FeedMeta {
+        id: row.get(0)?,
+        url: row.get(1)?,
+        etag: row.get(2)?,
+        last_modified: row.get(3)?,
+        interval_secs: row.get(4)?,
+        next_fetch_at: row.get(5)?,
+    })
+}
+
+const FEED_META_COLUMNS: &str = "id, url, etag, last_modified, interval_secs, next_fetch_at";
+
+pub fn get_feed_meta(conn: &Connection, feed_id: i64) -> Result<Option<FeedMeta>> {
+    conn.query_row(
+        &format!("SELECT {FEED_META_COLUMNS} FROM feeds WHERE id = ?1"),
+        params![feed_id],
+        row_to_feed_meta,
+    )
+    .optional()
+}
+
+pub fn list_feed_metas(conn: &Connection) -> Result<Vec<FeedMeta>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {FEED_META_COLUMNS} FROM feeds ORDER BY id"
+    ))?;
+    let rows = stmt.query_map([], row_to_feed_meta)?;
+    rows.collect()
+}
+
+/// Records a `304 Not Modified` response: only the next poll time moves.
+pub fn update_feed_not_modified(conn: &Connection, feed_id: i64, next_fetch_at: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE feeds SET next_fetch_at = ?1 WHERE id = ?2",
+        params![next_fetch_at, feed_id],
+    )?;
+    Ok(())
+}
+
+/// Records a `200 OK` response: the new etag/last_modified plus the
+/// next poll time.
+pub fn update_feed_fetched(
+    conn: &Connection,
+    feed_id: i64,
+    etag: Option<&str>,
+    last_modified: Option<&str>,
+    next_fetch_at: i64,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE feeds SET etag = ?1, last_modified = ?2, next_fetch_at = ?3 WHERE id = ?4",
+        params![etag, last_modified, next_fetch_at, feed_id],
+    )?;
+    Ok(())
 }
 
 /// Inserts new items for `feed_id`, skipping ones already present
@@ -243,5 +298,43 @@ mod tests {
 
         assert!(get_feed_by_id(&conn, feed_id + 1).unwrap().is_none());
         assert_eq!(list_feeds(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn feed_meta_defaults_and_not_modified_update() {
+        let conn = init_in_memory().unwrap();
+        let feed_id = insert_feed(&conn, "https://example.com/feed.xml", None, None, 0).unwrap();
+
+        let meta = get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(meta.etag, None);
+        assert_eq!(meta.last_modified, None);
+        assert_eq!(meta.interval_secs, 900); // schema default
+        assert_eq!(meta.next_fetch_at, 0); // schema default
+
+        update_feed_not_modified(&conn, feed_id, 1_700_000_900).unwrap();
+        let meta = get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(meta.next_fetch_at, 1_700_000_900);
+        assert_eq!(meta.etag, None); // untouched by a 304
+
+        assert_eq!(list_feed_metas(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn feed_meta_fetched_update() {
+        let conn = init_in_memory().unwrap();
+        let feed_id = insert_feed(&conn, "https://example.com/feed.xml", None, None, 0).unwrap();
+
+        update_feed_fetched(
+            &conn,
+            feed_id,
+            Some("etag-1"),
+            Some("Mon, 01 Jan 2024"),
+            999,
+        )
+        .unwrap();
+        let meta = get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(meta.etag, Some("etag-1".to_string()));
+        assert_eq!(meta.last_modified, Some("Mon, 01 Jan 2024".to_string()));
+        assert_eq!(meta.next_fetch_at, 999);
     }
 }
