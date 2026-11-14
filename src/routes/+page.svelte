@@ -16,6 +16,8 @@
 
   let feeds = $state<FeedSummary[]>([]);
   let items = $state<Item[]>([]);
+  let hasMoreItems = $state(true);
+  let loadingMoreItems = false; // plain guard against overlapping loads, not UI state
   let selectedFeedId = $state<number | null>(null);
   let selectedItemId = $state<number | null>(null);
 
@@ -24,9 +26,25 @@
   }
 
   // First page of the merged timeline (§6.3) for the current feed
-  // selection. Infinite scroll appends further pages - M7 item 5.
+  // selection - replaces items entirely (a feed-updated event or a
+  // feed-selection change can shift what "page 1" even means).
   async function refreshItems() {
     items = await listItems(PAGE_SIZE, 0, false, selectedFeedId);
+    hasMoreItems = items.length === PAGE_SIZE;
+  }
+
+  // Infinite scroll: VirtualList calls this when the user nears the
+  // bottom (onEndReached). Appends the next page via limit/offset.
+  async function loadMoreItems() {
+    if (loadingMoreItems || !hasMoreItems) return;
+    loadingMoreItems = true;
+    try {
+      const nextPage = await listItems(PAGE_SIZE, items.length, false, selectedFeedId);
+      items = [...items, ...nextPage];
+      hasMoreItems = nextPage.length === PAGE_SIZE;
+    } finally {
+      loadingMoreItems = false;
+    }
   }
 
   function selectFeed(feedId: number | null) {
@@ -55,7 +73,13 @@
     <FeedList {feeds} {selectedFeedId} onSelect={selectFeed} />
   </aside>
   <main class="pane timeline-pane">
-    <Timeline {items} {feeds} {selectedItemId} onSelect={(itemId) => (selectedItemId = itemId)} />
+    <Timeline
+      {items}
+      {feeds}
+      {selectedItemId}
+      onSelect={(itemId) => (selectedItemId = itemId)}
+      onEndReached={loadMoreItems}
+    />
   </main>
   <aside class="pane detail-pane">
     <DetailView />

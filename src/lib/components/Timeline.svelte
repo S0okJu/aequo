@@ -7,9 +7,10 @@
     feeds: FeedSummary[];
     selectedItemId: number | null;
     onSelect: (itemId: number) => void;
+    onEndReached?: () => void;
   }
 
-  let { items, feeds, selectedItemId, onSelect }: Props = $props();
+  let { items, feeds, selectedItemId, onSelect, onEndReached }: Props = $props();
 
   // Must match .row's fixed height exactly (padding + two text lines)
   // - VirtualList's index math depends on every row being this tall.
@@ -32,7 +33,7 @@
   {#if items.length === 0}
     <p class="empty">No items.</p>
   {:else}
-    <VirtualList {items} itemHeight={ROW_HEIGHT}>
+    <VirtualList {items} itemHeight={ROW_HEIGHT} {onEndReached}>
       {#snippet children(item)}
         <button
           class="row"
