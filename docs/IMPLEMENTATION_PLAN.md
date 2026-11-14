@@ -93,7 +93,7 @@
 - [x] Pagination/infinite scroll calling `list_items(limit, offset)`
 - [x] Call `mark_read` on item open + optimistic UI update
 - [x] Add-feed UI (URL input form, error message display)
-- [ ] Detail view: render body/summary
+- [x] Detail view: render body/summary
 
 ## M8. Security
 

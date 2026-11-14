@@ -22,6 +22,8 @@
   let selectedFeedId = $state<number | null>(null);
   let selectedItemId = $state<number | null>(null);
 
+  const selectedItem = $derived(items.find((i) => i.id === selectedItemId) ?? null);
+
   async function refreshFeeds() {
     feeds = await listFeeds();
   }
@@ -106,7 +108,7 @@
     <Timeline {items} {feeds} {selectedItemId} onSelect={selectItem} onEndReached={loadMoreItems} />
   </main>
   <aside class="pane detail-pane">
-    <DetailView />
+    <DetailView item={selectedItem} {feeds} />
   </aside>
 </div>
 
