@@ -139,3 +139,109 @@ pub fn count_unread(conn: &Connection, feed_id: i64) -> Result<i64> {
         |row| row.get(0),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_in_memory;
+
+    fn sample_item(guid_hash: &str) -> NewItem {
+        NewItem {
+            guid_hash: guid_hash.to_string(),
+            title: Some("Title".to_string()),
+            link: Some("https://example.com/post".to_string()),
+            summary: Some("Summary".to_string()),
+            published_at: 1_700_000_000,
+            fetched_at: 1_700_000_100,
+        }
+    }
+
+    #[test]
+    fn schema_creates_feeds_and_items_tables() {
+        let conn = init_in_memory().unwrap();
+        let table_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('feeds', 'items')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 2);
+    }
+
+    #[test]
+    fn duplicate_items_are_ignored_on_upsert() {
+        let conn = init_in_memory().unwrap();
+        let feed_id = insert_feed(&conn, "https://example.com/feed.xml", None, None, 0).unwrap();
+
+        let first_pass = upsert_items(&conn, feed_id, &[sample_item("guid-1")]).unwrap();
+        assert_eq!(first_pass, 1);
+
+        // Same guid_hash again (simulating a re-fetch with no new content) must be ignored.
+        let second_pass = upsert_items(&conn, feed_id, &[sample_item("guid-1")]).unwrap();
+        assert_eq!(second_pass, 0);
+
+        let items = list_items(&conn, 10, 0, false).unwrap();
+        assert_eq!(items.len(), 1);
+    }
+
+    #[test]
+    fn mark_read_and_count_unread_roundtrip() {
+        let conn = init_in_memory().unwrap();
+        let feed_id = insert_feed(&conn, "https://example.com/feed.xml", None, None, 0).unwrap();
+        upsert_items(
+            &conn,
+            feed_id,
+            &[sample_item("guid-1"), sample_item("guid-2")],
+        )
+        .unwrap();
+
+        assert_eq!(count_unread(&conn, feed_id).unwrap(), 2);
+
+        let items = list_items(&conn, 10, 0, false).unwrap();
+        mark_read(&conn, items[0].id).unwrap();
+        assert_eq!(count_unread(&conn, feed_id).unwrap(), 1);
+
+        mark_feed_read(&conn, feed_id).unwrap();
+        assert_eq!(count_unread(&conn, feed_id).unwrap(), 0);
+    }
+
+    #[test]
+    fn list_items_unread_only_filters_read_items() {
+        let conn = init_in_memory().unwrap();
+        let feed_id = insert_feed(&conn, "https://example.com/feed.xml", None, None, 0).unwrap();
+        upsert_items(
+            &conn,
+            feed_id,
+            &[sample_item("guid-1"), sample_item("guid-2")],
+        )
+        .unwrap();
+
+        let all_items = list_items(&conn, 10, 0, false).unwrap();
+        mark_read(&conn, all_items[0].id).unwrap();
+
+        let unread_items = list_items(&conn, 10, 0, true).unwrap();
+        assert_eq!(unread_items.len(), 1);
+        assert!(!unread_items[0].is_read);
+    }
+
+    #[test]
+    fn get_feed_by_id_and_list_feeds() {
+        let conn = init_in_memory().unwrap();
+        let feed_id = insert_feed(
+            &conn,
+            "https://example.com/feed.xml",
+            Some("Example"),
+            Some("rss"),
+            0,
+        )
+        .unwrap();
+
+        let feed = get_feed_by_id(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(feed.url, "https://example.com/feed.xml");
+        assert_eq!(feed.title, Some("Example".to_string()));
+
+        assert!(get_feed_by_id(&conn, feed_id + 1).unwrap().is_none());
+        assert_eq!(list_feeds(&conn).unwrap().len(), 1);
+    }
+}
