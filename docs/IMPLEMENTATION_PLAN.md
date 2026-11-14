@@ -91,7 +91,7 @@
 - [x] Timeline: sorted by `published_at DESC`, visually distinguishing unread (bold/dot) from read (dimmed)
 - [x] Apply virtual scrolling — keep DOM node count bounded when rendering thousands of items
 - [x] Pagination/infinite scroll calling `list_items(limit, offset)`
-- [ ] Call `mark_read` on item open + optimistic UI update
+- [x] Call `mark_read` on item open + optimistic UI update
 - [ ] Add-feed UI (URL input form, error message display)
 - [ ] Detail view: render body/summary
 

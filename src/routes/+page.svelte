@@ -4,7 +4,7 @@
   import FeedList from '$lib/components/FeedList.svelte';
   import Timeline from '$lib/components/Timeline.svelte';
   import DetailView from '$lib/components/DetailView.svelte';
-  import { listFeeds, listItems } from '$lib/api';
+  import { listFeeds, listItems, markRead } from '$lib/api';
   import type { FeedSummary, Item } from '$lib/types';
 
   const PAGE_SIZE = 50;
@@ -52,6 +52,27 @@
     refreshItems();
   }
 
+  // Opening an item marks it read (§6.3): flip locally first so the
+  // UI responds immediately, persist in the background, and revert
+  // if the backend call fails.
+  async function selectItem(itemId: number) {
+    selectedItemId = itemId;
+    const item = items.find((i) => i.id === itemId);
+    if (!item || item.isRead) return;
+
+    item.isRead = true;
+    const feed = feeds.find((f) => f.id === item.feedId);
+    if (feed) feed.unreadCount = Math.max(0, feed.unreadCount - 1);
+
+    try {
+      await markRead(itemId);
+    } catch (err) {
+      item.isRead = false;
+      if (feed) feed.unreadCount += 1;
+      console.error('mark_read failed:', err);
+    }
+  }
+
   onMount(() => {
     refreshFeeds();
     refreshItems();
@@ -73,13 +94,7 @@
     <FeedList {feeds} {selectedFeedId} onSelect={selectFeed} />
   </aside>
   <main class="pane timeline-pane">
-    <Timeline
-      {items}
-      {feeds}
-      {selectedItemId}
-      onSelect={(itemId) => (selectedItemId = itemId)}
-      onEndReached={loadMoreItems}
-    />
+    <Timeline {items} {feeds} {selectedItemId} onSelect={selectItem} onEndReached={loadMoreItems} />
   </main>
   <aside class="pane detail-pane">
     <DetailView />
