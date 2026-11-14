@@ -194,4 +194,38 @@ mod tests {
 
         assert_eq!(db::count_unread(&conn, feed_id).unwrap(), 0); // no body was ever parsed
     }
+
+    #[tokio::test]
+    async fn poll_feed_parse_error_skips_cycle_and_retries_next_time() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/feed.xml"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("this is not a feed"))
+            .mount(&mock_server)
+            .await;
+
+        let url = format!("{}/feed.xml", mock_server.uri());
+        let conn = db::init_in_memory().unwrap();
+        let feed_id = db::insert_feed(&conn, &url, None, None, 0).unwrap();
+        let meta = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
+
+        let outcome = poll_feed(&conn, &meta).await.unwrap();
+        match outcome {
+            PollOutcome::Failed { error } => assert!(!error.is_empty()),
+            other => panic!("expected Failed, got {other:?}"),
+        }
+
+        let updated = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(updated.consecutive_failures, 1);
+        // Rescheduled, not stuck at the old next_fetch_at - "retry on
+        // next poll" rather than this cycle silently never ending.
+        assert!(updated.next_fetch_at > 0);
+        assert_eq!(updated.etag, None); // nothing new to adopt from an unparseable body
+        assert_eq!(db::count_unread(&conn, feed_id).unwrap(), 0); // "skip only that cycle" - no items stored
+
+        // Recovery on a later successful poll is already covered by
+        // db::repository::tests::success_paths_clear_prior_failure_state
+        // (update_feed_fetched/update_feed_not_modified both reset
+        // consecutive_failures/last_error).
+    }
 }
