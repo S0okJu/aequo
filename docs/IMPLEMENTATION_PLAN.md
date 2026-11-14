@@ -43,11 +43,11 @@
 ## M3. Conditional Requests & Fetch Workers (core efficiency work)
 
 - [x] `FeedMeta` struct (`etag`, `last_modified`, `interval_secs`, `next_fetch_at`) mapped to DB columns
-- [ ] Apply conditional requests: set `If-None-Match` / `If-Modified-Since` headers on each request
+- [x] Apply conditional requests: set `If-None-Match` / `If-Modified-Since` headers on each request
 - [ ] Response handling branches
   - [ ] `304 Not Modified` → exit immediately with no body download/parsing, update only `next_fetch_at`
   - [ ] `200 OK` → parse → insert only new items (ignore UNIQUE conflicts) → update `etag`/`last_modified`/`next_fetch_at`
-- [ ] Set a timeout per request (e.g., 10s)
+- [x] Set a timeout per request (e.g., 10s)
 - [ ] Integration tests: verify all three scenarios (304/200/timeout) using `wiremock`
 
 ## M4. Bounded Concurrency & Poll Scheduler
