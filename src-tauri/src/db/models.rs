@@ -11,6 +11,7 @@ pub struct Feed {
     pub interval_secs: i64,
     pub next_fetch_at: i64,
     pub last_error: Option<String>,
+    pub consecutive_failures: i64,
     pub created_at: i64,
 }
 
@@ -51,4 +52,5 @@ pub struct FeedMeta {
     pub last_modified: Option<String>,
     pub interval_secs: i64,
     pub next_fetch_at: i64,
+    pub consecutive_failures: i64,
 }

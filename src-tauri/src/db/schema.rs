@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS feeds (
     interval_secs   INTEGER NOT NULL DEFAULT 900,
     next_fetch_at   INTEGER NOT NULL DEFAULT 0,
     last_error      TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
     created_at      INTEGER NOT NULL
 );
 

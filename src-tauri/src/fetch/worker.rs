@@ -10,6 +10,7 @@ use rusqlite::Connection;
 
 use crate::db::{self, FeedMeta};
 
+use super::backoff;
 use super::client::{self, ConditionalFetch};
 use super::parser;
 
@@ -22,6 +23,11 @@ pub enum PollOutcome {
     /// inserted (existing items are skipped by `db::upsert_items`'s
     /// dedup).
     Updated { new_item_count: usize },
+    /// The fetch (network/timeout) or the parse failed; recorded to
+    /// `last_error` and rescheduled via backoff (§7) rather than
+    /// bubbling up as a hard `Err` - a misbehaving feed shouldn't look
+    /// like an infrastructure failure to the caller.
+    Failed { error: String },
 }
 
 fn now_unix() -> i64 {
@@ -32,19 +38,20 @@ fn now_unix() -> i64 {
 }
 
 /// Polls one feed: sends a conditional GET using its stored
-/// etag/last_modified, then either just reschedules it (304) or
-/// parses the body, stores new items, and updates its
-/// etag/last_modified (200).
+/// etag/last_modified, then either just reschedules it (304), parses
+/// the body and stores new items (200), or records the failure (§7)
+/// if the fetch itself errored.
 pub async fn poll_feed(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome, String> {
-    let fetched = client::fetch_conditional(
+    match client::fetch_conditional(
         &meta.url,
         meta.etag.as_deref(),
         meta.last_modified.as_deref(),
     )
     .await
-    .map_err(|e| e.to_string())?;
-
-    apply_fetch(conn, meta, fetched)
+    {
+        Ok(fetched) => apply_fetch(conn, meta, fetched),
+        Err(err) => record_failure(conn, meta, &err.to_string()),
+    }
 }
 
 /// Applies an already-fetched response to the DB. Split out from
@@ -58,10 +65,9 @@ pub fn apply_fetch(
     meta: &FeedMeta,
     fetched: ConditionalFetch,
 ) -> Result<PollOutcome, String> {
-    let next_fetch_at = now_unix() + meta.interval_secs;
-
     match fetched {
         ConditionalFetch::NotModified => {
+            let next_fetch_at = now_unix() + meta.interval_secs;
             db::update_feed_not_modified(conn, meta.id, next_fetch_at)
                 .map_err(|e| e.to_string())?;
             Ok(PollOutcome::NotModified)
@@ -70,24 +76,54 @@ pub fn apply_fetch(
             bytes,
             etag,
             last_modified,
-        } => {
-            let parsed = parser::parse(&bytes).map_err(|e| e.to_string())?;
-            let items = parser::to_new_items(&parsed, now_unix());
-            let new_item_count =
-                db::upsert_items(conn, meta.id, &items).map_err(|e| e.to_string())?;
+        } => match parser::parse(&bytes) {
+            Ok(parsed) => {
+                let now = now_unix();
+                let items = parser::to_new_items(&parsed, now);
+                let new_item_count =
+                    db::upsert_items(conn, meta.id, &items).map_err(|e| e.to_string())?;
 
-            db::update_feed_fetched(
-                conn,
-                meta.id,
-                etag.as_deref(),
-                last_modified.as_deref(),
-                next_fetch_at,
-            )
-            .map_err(|e| e.to_string())?;
+                db::update_feed_fetched(
+                    conn,
+                    meta.id,
+                    etag.as_deref(),
+                    last_modified.as_deref(),
+                    now + meta.interval_secs,
+                )
+                .map_err(|e| e.to_string())?;
 
-            Ok(PollOutcome::Updated { new_item_count })
-        }
+                Ok(PollOutcome::Updated { new_item_count })
+            }
+            // Parsing failed even though the fetch succeeded: skip
+            // this cycle only, retry on the next poll (§7). etag/
+            // last_modified are deliberately left untouched here (see
+            // record_failure) so a subsequent identical 200 can be
+            // re-attempted rather than silently becoming a 304.
+            Err(parse_err) => record_failure(conn, meta, &parse_err.to_string()),
+        },
     }
+}
+
+/// Records a failed attempt: bumps `consecutive_failures`, writes
+/// `last_error`, and reschedules via exponential backoff (capped at
+/// the feed's own interval) instead of the normal interval (§7). `pub`
+/// so the scheduler (M4) can record a network-fetch failure too, from
+/// the point where it already holds the lock after its own await.
+pub fn record_failure(
+    conn: &Connection,
+    meta: &FeedMeta,
+    error: &str,
+) -> Result<PollOutcome, String> {
+    let consecutive_failures = meta.consecutive_failures + 1;
+    let next_fetch_at =
+        now_unix() + backoff::backoff_secs(consecutive_failures, meta.interval_secs);
+
+    db::update_feed_failed(conn, meta.id, error, next_fetch_at, consecutive_failures)
+        .map_err(|e| e.to_string())?;
+
+    Ok(PollOutcome::Failed {
+        error: error.to_string(),
+    })
 }
 
 #[cfg(test)]

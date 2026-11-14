@@ -30,11 +30,12 @@ fn row_to_feed(row: &rusqlite::Row) -> rusqlite::Result<Feed> {
         interval_secs: row.get(6)?,
         next_fetch_at: row.get(7)?,
         last_error: row.get(8)?,
-        created_at: row.get(9)?,
+        consecutive_failures: row.get(9)?,
+        created_at: row.get(10)?,
     })
 }
 
-const FEED_COLUMNS: &str = "id, url, title, format, etag, last_modified, interval_secs, next_fetch_at, last_error, created_at";
+const FEED_COLUMNS: &str = "id, url, title, format, etag, last_modified, interval_secs, next_fetch_at, last_error, consecutive_failures, created_at";
 
 pub fn get_feed_by_id(conn: &Connection, feed_id: i64) -> Result<Option<Feed>> {
     conn.query_row(
@@ -59,10 +60,12 @@ fn row_to_feed_meta(row: &rusqlite::Row) -> rusqlite::Result<FeedMeta> {
         last_modified: row.get(3)?,
         interval_secs: row.get(4)?,
         next_fetch_at: row.get(5)?,
+        consecutive_failures: row.get(6)?,
     })
 }
 
-const FEED_META_COLUMNS: &str = "id, url, etag, last_modified, interval_secs, next_fetch_at";
+const FEED_META_COLUMNS: &str =
+    "id, url, etag, last_modified, interval_secs, next_fetch_at, consecutive_failures";
 
 pub fn get_feed_meta(conn: &Connection, feed_id: i64) -> Result<Option<FeedMeta>> {
     conn.query_row(
@@ -91,17 +94,19 @@ pub fn list_due_feed_metas(conn: &Connection, now: i64) -> Result<Vec<FeedMeta>>
     rows.collect()
 }
 
-/// Records a `304 Not Modified` response: only the next poll time moves.
+/// Records a `304 Not Modified` response: the next poll time moves,
+/// and a clean response clears any prior failure state (§7).
 pub fn update_feed_not_modified(conn: &Connection, feed_id: i64, next_fetch_at: i64) -> Result<()> {
     conn.execute(
-        "UPDATE feeds SET next_fetch_at = ?1 WHERE id = ?2",
+        "UPDATE feeds SET next_fetch_at = ?1, consecutive_failures = 0, last_error = NULL \
+         WHERE id = ?2",
         params![next_fetch_at, feed_id],
     )?;
     Ok(())
 }
 
-/// Records a `200 OK` response: the new etag/last_modified plus the
-/// next poll time.
+/// Records a `200 OK` response: the new etag/last_modified, the next
+/// poll time, and clears any prior failure state (§7).
 pub fn update_feed_fetched(
     conn: &Connection,
     feed_id: i64,
@@ -110,8 +115,28 @@ pub fn update_feed_fetched(
     next_fetch_at: i64,
 ) -> Result<()> {
     conn.execute(
-        "UPDATE feeds SET etag = ?1, last_modified = ?2, next_fetch_at = ?3 WHERE id = ?4",
+        "UPDATE feeds SET etag = ?1, last_modified = ?2, next_fetch_at = ?3, \
+         consecutive_failures = 0, last_error = NULL WHERE id = ?4",
         params![etag, last_modified, next_fetch_at, feed_id],
+    )?;
+    Ok(())
+}
+
+/// Records a failed attempt (network error or parse error, §7):
+/// `etag`/`last_modified` are left untouched (nothing new to adopt),
+/// but `last_error`, `consecutive_failures`, and `next_fetch_at`
+/// (backoff-scheduled, not the normal interval) all move.
+pub fn update_feed_failed(
+    conn: &Connection,
+    feed_id: i64,
+    error: &str,
+    next_fetch_at: i64,
+    consecutive_failures: i64,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE feeds SET last_error = ?1, next_fetch_at = ?2, consecutive_failures = ?3 \
+         WHERE id = ?4",
+        params![error, next_fetch_at, consecutive_failures, feed_id],
     )?;
     Ok(())
 }
@@ -364,5 +389,43 @@ mod tests {
 
         let all_due = list_due_feed_metas(&conn, 9999).unwrap();
         assert_eq!(all_due.len(), 2);
+    }
+
+    #[test]
+    fn update_feed_failed_records_error_without_touching_etag() {
+        let conn = init_in_memory().unwrap();
+        let feed_id = insert_feed(&conn, "https://example.com/feed.xml", None, None, 0).unwrap();
+        update_feed_fetched(&conn, feed_id, Some("etag-1"), Some("lm-1"), 500).unwrap();
+
+        update_feed_failed(&conn, feed_id, "connection timed out", 600, 1).unwrap();
+
+        let meta = get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(meta.next_fetch_at, 600);
+        assert_eq!(meta.consecutive_failures, 1);
+        assert_eq!(meta.etag, Some("etag-1".to_string())); // untouched by a failure
+        assert_eq!(meta.last_modified, Some("lm-1".to_string()));
+
+        let feed = get_feed_by_id(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(feed.last_error, Some("connection timed out".to_string()));
+    }
+
+    #[test]
+    fn success_paths_clear_prior_failure_state() {
+        let conn = init_in_memory().unwrap();
+        let feed_id = insert_feed(&conn, "https://example.com/feed.xml", None, None, 0).unwrap();
+        update_feed_failed(&conn, feed_id, "boom", 100, 2).unwrap();
+
+        update_feed_not_modified(&conn, feed_id, 200).unwrap();
+        let meta = get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(meta.consecutive_failures, 0);
+        let feed = get_feed_by_id(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(feed.last_error, None);
+
+        update_feed_failed(&conn, feed_id, "boom again", 300, 1).unwrap();
+        update_feed_fetched(&conn, feed_id, Some("etag-2"), None, 400).unwrap();
+        let meta = get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(meta.consecutive_failures, 0);
+        let feed = get_feed_by_id(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(feed.last_error, None);
     }
 }

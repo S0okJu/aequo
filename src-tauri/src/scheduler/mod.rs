@@ -36,21 +36,25 @@ fn now_unix() -> i64 {
 }
 
 /// Fetches (no DB lock held) then applies (DB lock held only for the
-/// synchronous part) one feed. See [`worker::apply_fetch`]'s doc for
-/// why the lock can't simply wrap the whole async call.
+/// synchronous part) one feed - mirrors [`worker::poll_feed`], but
+/// split so the lock is only ever acquired after the await completes.
+/// See [`worker::apply_fetch`]'s doc for why it can't simply wrap the
+/// whole async call.
 async fn poll_one(conn: &Arc<Mutex<Connection>>, meta: &FeedMeta) -> Result<PollOutcome, String> {
     let fetched = client::fetch_conditional(
         &meta.url,
         meta.etag.as_deref(),
         meta.last_modified.as_deref(),
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await;
 
     let guard = conn
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
-    worker::apply_fetch(&guard, meta, fetched)
+    match fetched {
+        Ok(fetched) => worker::apply_fetch(&guard, meta, fetched),
+        Err(err) => worker::record_failure(&guard, meta, &err.to_string()),
+    }
 }
 
 /// Polls every feed whose `next_fetch_at` has passed, bounding
@@ -81,9 +85,19 @@ pub async fn poll_due_feeds(conn: Arc<Mutex<Connection>>) -> usize {
 
     while let Some(joined) = set.join_next().await {
         match joined {
+            // Recorded to last_error/consecutive_failures already
+            // (§7) - still logged here so failures are visible
+            // without needing to query the DB.
+            Ok((url, Ok(PollOutcome::Failed { error }))) => {
+                eprintln!("poll failed for {url}: {error}")
+            }
             // Success: nothing to log. M6 will emit("feed-updated", ...)
             // here once the frontend exists to receive it.
             Ok((_, Ok(_))) => {}
+            // A hard Err means the DB write itself failed (lock
+            // poisoned, disk error, etc.) - an infra problem, not a
+            // feed-specific one, so it couldn't be recorded to
+            // last_error.
             Ok((url, Err(err))) => eprintln!("poll failed for {url}: {err}"),
             Err(join_err) => eprintln!("fetch task panicked: {join_err}"),
         }
@@ -231,10 +245,16 @@ mod tests {
 
         let guard = conn.lock().unwrap();
         let good_meta = db::get_feed_meta(&guard, good_id).unwrap().unwrap();
-        assert!(good_meta.next_fetch_at > 0); // succeeded, rescheduled
+        assert!(good_meta.next_fetch_at > 0); // succeeded, rescheduled normally
+        assert_eq!(good_meta.consecutive_failures, 0);
 
+        // Failed, but still recorded (§7) rather than left untouched -
+        // rescheduled via backoff, not stuck at next_fetch_at = 0.
         let bad_meta = db::get_feed_meta(&guard, bad_id).unwrap().unwrap();
-        assert_eq!(bad_meta.next_fetch_at, 0); // failed before any DB update
+        assert!(bad_meta.next_fetch_at > 0);
+        assert_eq!(bad_meta.consecutive_failures, 1);
+        let bad_feed = db::get_feed_by_id(&guard, bad_id).unwrap().unwrap();
+        assert!(bad_feed.last_error.is_some());
     }
 
     #[test]
