@@ -18,6 +18,7 @@
 - [ ] Add dependencies: `rusqlite` (bundled, WAL), `reqwest` (rustls, gzip), `feed-rs`, `tokio`
 - [ ] Set up `.gitignore` and lint/format config (`rustfmt`, `clippy`, `eslint`/`prettier`)
 - [ ] Get the basic app window running (confirm `tauri dev` works, even with an empty screen)
+- [ ] Generate the Tauri app icon set from `img/logo.png` (`tauri icon img/logo.png`)
 
 ## M1. Data Model & DB Layer
 
@@ -117,6 +118,7 @@
 ## M11. Build/Deployment
 
 - [ ] Confirm `tauri build` produces a working `.app`/`.dmg`
+- [ ] Confirm the app icon (generated from `img/logo.png` in M0) appears correctly in the built `.app`/`.dmg`
 - [ ] Developer ID signing + notarization (to pass Gatekeeper)
 - [ ] (Optional) Decide whether to adopt the Tauri Updater plugin — fine to defer past v1
 
