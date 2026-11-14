@@ -7,6 +7,8 @@ use feed_rs::model::{Entry, Feed, FeedType};
 use feed_rs::parser;
 use sha2::{Digest, Sha256};
 
+use crate::db::NewItem;
+
 pub use feed_rs::parser::ParseFeedError;
 
 /// Parses RSS/Atom/JSON Feed bytes into feed-rs's shared `Feed` model.
@@ -21,6 +23,29 @@ pub fn format_label(feed: &Feed) -> &'static str {
         FeedType::JSON => "json_feed",
         FeedType::RSS0 | FeedType::RSS1 | FeedType::RSS2 => "rss",
     }
+}
+
+/// Converts a parsed feed's entries into `NewItem`s ready for
+/// `db::upsert_items`. Shared by `add_feed` (initial fetch) and the
+/// fetch worker (polling), so dedup/field-mapping logic lives in one
+/// place.
+pub fn to_new_items(parsed: &Feed, fetched_at: i64) -> Vec<NewItem> {
+    parsed
+        .entries
+        .iter()
+        .map(|entry| NewItem {
+            guid_hash: guid_hash(entry),
+            title: entry.title.as_ref().map(|t| t.content.clone()),
+            link: entry.links.first().map(|l| l.href.clone()),
+            summary: entry.summary.as_ref().map(|t| t.content.clone()),
+            published_at: entry
+                .published
+                .or(entry.updated)
+                .map(|dt| dt.timestamp())
+                .unwrap_or(fetched_at),
+            fetched_at,
+        })
+        .collect()
 }
 
 /// Dedup key for an entry: a hash of its guid/id if present, otherwise a

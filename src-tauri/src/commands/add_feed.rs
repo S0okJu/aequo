@@ -7,7 +7,7 @@ use feed_rs::model::Feed;
 use rusqlite::Connection;
 use tauri::State;
 
-use crate::db::{self, NewItem};
+use crate::db;
 use crate::fetch;
 
 /// Fetches and parses a feed URL. Split out from the `#[tauri::command]`
@@ -22,25 +22,6 @@ pub async fn fetch_and_parse(url: &str) -> Result<Feed, String> {
 
 fn feed_title(parsed: &Feed) -> Option<String> {
     parsed.title.as_ref().map(|t| t.content.clone())
-}
-
-fn to_new_items(parsed: &Feed, fetched_at: i64) -> Vec<NewItem> {
-    parsed
-        .entries
-        .iter()
-        .map(|entry| NewItem {
-            guid_hash: fetch::parser::guid_hash(entry),
-            title: entry.title.as_ref().map(|t| t.content.clone()),
-            link: entry.links.first().map(|l| l.href.clone()),
-            summary: entry.summary.as_ref().map(|t| t.content.clone()),
-            published_at: entry
-                .published
-                .or(entry.updated)
-                .map(|dt| dt.timestamp())
-                .unwrap_or(fetched_at),
-            fetched_at,
-        })
-        .collect()
 }
 
 fn now_unix() -> i64 {
@@ -61,7 +42,7 @@ pub fn store_feed(conn: &Connection, url: &str, parsed: &Feed) -> Result<i64, St
     let feed_id = db::insert_feed(conn, url, title.as_deref(), Some(format), now)
         .map_err(|e| e.to_string())?;
 
-    let items = to_new_items(parsed, now);
+    let items = fetch::parser::to_new_items(parsed, now);
     db::upsert_items(conn, feed_id, &items).map_err(|e| e.to_string())?;
 
     Ok(feed_id)
