@@ -37,7 +37,7 @@
   - [x] Fetch the URL → detect format from `Content-Type` + body (feed-rs auto-detection)
   - [x] On successful parse: insert into `feeds` + bulk-insert initial items
   - [x] On parse/network failure: return the error as-is to the frontend
-- [ ] Unit tests: verify parsing results against RSS 2.0 / Atom / JSON Feed sample files
+- [x] Unit tests: verify parsing results against RSS 2.0 / Atom / JSON Feed sample files
 - [ ] Manual test: register 3–5 real blog RSS feeds
 
 ## M3. Conditional Requests & Fetch Workers (core efficiency work)
