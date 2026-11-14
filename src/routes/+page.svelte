@@ -4,6 +4,7 @@
   import FeedList from '$lib/components/FeedList.svelte';
   import Timeline from '$lib/components/Timeline.svelte';
   import DetailView from '$lib/components/DetailView.svelte';
+  import AddFeedForm from '$lib/components/AddFeedForm.svelte';
   import { listFeeds, listItems, markRead } from '$lib/api';
   import type { FeedSummary, Item } from '$lib/types';
 
@@ -52,6 +53,11 @@
     refreshItems();
   }
 
+  function handleFeedAdded() {
+    refreshFeeds();
+    refreshItems();
+  }
+
   // Opening an item marks it read (§6.3): flip locally first so the
   // UI responds immediately, persist in the background, and revert
   // if the backend call fails.
@@ -91,7 +97,10 @@
 
 <div class="layout">
   <aside class="pane feed-list-pane">
-    <FeedList {feeds} {selectedFeedId} onSelect={selectFeed} />
+    <div class="feed-list-scroll">
+      <FeedList {feeds} {selectedFeedId} onSelect={selectFeed} />
+    </div>
+    <AddFeedForm onAdded={handleFeedAdded} />
   </aside>
   <main class="pane timeline-pane">
     <Timeline {items} {feeds} {selectedItemId} onSelect={selectItem} onEndReached={loadMoreItems} />
@@ -115,8 +124,16 @@
   }
 
   .feed-list-pane {
+    display: flex;
+    flex-direction: column;
     background: var(--color-bg-secondary);
     border-right: 1px solid var(--color-border);
+  }
+
+  .feed-list-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .timeline-pane {

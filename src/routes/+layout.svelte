@@ -18,6 +18,7 @@
     --color-accent: #0a7cff;
     --color-selection-bg: #e5f1ff;
     --color-hover-bg: #f0f0f1;
+    --color-error: #d1453b;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -31,6 +32,7 @@
       --color-accent: #4aa3ff;
       --color-selection-bg: #1c3a5e;
       --color-hover-bg: #2a2a2c;
+      --color-error: #ff6b61;
     }
   }
 
