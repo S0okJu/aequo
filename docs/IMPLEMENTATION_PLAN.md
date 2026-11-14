@@ -32,7 +32,7 @@
 ## M2. Feed Parsing & "Add Feed" Flow
 
 - [x] Write a `feed-rs` wrapper — convert RSS/Atom/JSON Feed input into the shared internal model
-- [ ] GUID hashing logic: hash the `guid` if present, otherwise hash the normalized `link`
+- [x] GUID hashing logic: hash the `guid` if present, otherwise hash the normalized `link`
 - [ ] Implement the `add_feed(url)` Tauri command
   - [ ] Fetch the URL → detect format from `Content-Type` + body (feed-rs auto-detection)
   - [ ] On successful parse: insert into `feeds` + bulk-insert initial items

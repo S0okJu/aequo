@@ -26,6 +26,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
 feed-rs = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+sha2 = "0.10"
 
 [lints.clippy]
 all = "warn"
