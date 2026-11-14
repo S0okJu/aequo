@@ -19,6 +19,11 @@ export default [
       // parameter names (e.g. an interface method's param); the
       // typescript-eslint version does.
       'no-unused-vars': 'off',
+      // tsc/svelte-check (tsconfig's "dom" lib) already catch a
+      // genuinely undefined identifier more accurately than base
+      // no-undef, which doesn't know DOM globals (HTMLDivElement,
+      // ResizeObserver, etc.) without a separate globals package.
+      'no-undef': 'off',
     },
   },
   {
