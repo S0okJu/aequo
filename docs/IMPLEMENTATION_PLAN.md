@@ -17,7 +17,7 @@
 - [x] Organize the Rust workspace structure (split modules like `src-tauri/src/{commands,db,fetch,scheduler}`)
 - [x] Add dependencies: `rusqlite` (bundled, WAL), `reqwest` (rustls, gzip), `feed-rs`, `tokio`
 - [x] Set up `.gitignore` and lint/format config (`rustfmt`, `clippy`, `eslint`/`prettier`)
-- [ ] Get the basic app window running (confirm `tauri dev` works, even with an empty screen)
+- [x] Get the basic app window running (confirm `tauri dev` works, even with an empty screen)
 - [ ] Generate the Tauri app icon set from `img/logo.png` (`tauri icon img/logo.png`)
 
 ## M1. Data Model & DB Layer
