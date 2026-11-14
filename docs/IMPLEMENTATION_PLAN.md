@@ -56,7 +56,7 @@
 - [x] Run fetch workers via `JoinSet` + log errors
 - [x] Poll Scheduler: query feeds where `next_fetch_at <= now` → dispatch workers under the semaphore limit
 - [x] Fully sleep when idle: `tokio::time::sleep_until(next_wake)` — no busy-loop/fixed-interval wakeups
-- [ ] Start the scheduler on app launch, run it as a persistent background task
+- [x] Start the scheduler on app launch, run it as a persistent background task
 - [ ] Manual test: register 10+ feeds, confirm idle CPU in Activity Monitor
 
 ## M5. Error Handling & Retry
