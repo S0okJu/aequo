@@ -24,6 +24,18 @@ fn shared_client() -> &'static reqwest::Client {
     })
 }
 
+/// Describes a fetch error for `last_error`/logs: `reqwest::Error`'s
+/// `Display` doesn't reliably surface "timed out" in its top-level
+/// message, so callers that only have the string (not the structured
+/// error) can't tell a timeout from any other connection failure.
+pub fn describe_error(err: &reqwest::Error) -> String {
+    if err.is_timeout() {
+        format!("request timed out: {err}")
+    } else {
+        err.to_string()
+    }
+}
+
 pub async fn fetch_bytes(url: &str) -> Result<Vec<u8>, reqwest::Error> {
     let response = shared_client().get(url).send().await?.error_for_status()?;
     Ok(response.bytes().await?.to_vec())

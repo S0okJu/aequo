@@ -50,7 +50,7 @@ pub async fn poll_feed(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome
     .await
     {
         Ok(fetched) => apply_fetch(conn, meta, fetched),
-        Err(err) => record_failure(conn, meta, &err.to_string()),
+        Err(err) => record_failure(conn, meta, &client::describe_error(&err)),
     }
 }
 

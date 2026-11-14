@@ -53,7 +53,7 @@ async fn poll_one(conn: &Arc<Mutex<Connection>>, meta: &FeedMeta) -> Result<Poll
         .map_err(|_| "database lock poisoned".to_string())?;
     match fetched {
         Ok(fetched) => worker::apply_fetch(&guard, meta, fetched),
-        Err(err) => worker::record_failure(&guard, meta, &err.to_string()),
+        Err(err) => worker::record_failure(&guard, meta, &client::describe_error(&err)),
     }
 }
 
@@ -255,6 +255,66 @@ mod tests {
         assert_eq!(bad_meta.consecutive_failures, 1);
         let bad_feed = db::get_feed_by_id(&guard, bad_id).unwrap().unwrap();
         assert!(bad_feed.last_error.is_some());
+    }
+
+    /// Same claim as `poll_due_feeds_continues_past_one_failure`, but
+    /// for a real *timeout* specifically (item 3 names both "network
+    /// errors/timeouts" separately) through the actual production
+    /// codepath (client::fetch_conditional's real 10s REQUEST_TIMEOUT,
+    /// not an injected short one). #[ignore]'d since it must wait out
+    /// that real 10s - run manually with `cargo test -- --ignored`.
+    #[tokio::test]
+    #[ignore]
+    async fn poll_due_feeds_timeout_does_not_block_other_feeds() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/good.xml"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(RSS2_FIXTURE))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/slow.xml"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(11)))
+            .mount(&mock_server)
+            .await;
+
+        let conn = init_in_memory().unwrap();
+        let good_id = db::insert_feed(
+            &conn,
+            &format!("{}/good.xml", mock_server.uri()),
+            None,
+            None,
+            0,
+        )
+        .unwrap();
+        let slow_id = db::insert_feed(
+            &conn,
+            &format!("{}/slow.xml", mock_server.uri()),
+            None,
+            None,
+            0,
+        )
+        .unwrap();
+        let conn = shared_conn(conn);
+
+        let attempted = poll_due_feeds(conn.clone()).await;
+        assert_eq!(attempted, 2);
+
+        let guard = conn.lock().unwrap();
+        let good_meta = db::get_feed_meta(&guard, good_id).unwrap().unwrap();
+        assert!(good_meta.next_fetch_at > 0);
+        assert_eq!(good_meta.consecutive_failures, 0);
+
+        let slow_meta = db::get_feed_meta(&guard, slow_id).unwrap().unwrap();
+        assert_eq!(slow_meta.consecutive_failures, 1);
+        let slow_feed = db::get_feed_by_id(&guard, slow_id).unwrap().unwrap();
+        let error = slow_feed
+            .last_error
+            .expect("expected a recorded timeout error");
+        assert!(
+            error.contains("timed out") || error.contains("timeout"),
+            "{error}"
+        );
     }
 
     #[test]

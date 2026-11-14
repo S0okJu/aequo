@@ -16,7 +16,7 @@ use crate::fetch;
 pub async fn fetch_and_parse(url: &str) -> Result<Feed, String> {
     let bytes = fetch::client::fetch_bytes(url)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| fetch::client::describe_error(&e))?;
     fetch::parser::parse(&bytes).map_err(|e| e.to_string())
 }
 
