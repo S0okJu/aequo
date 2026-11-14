@@ -1,45 +1,45 @@
-# 개발 워크플로우 가이드라인
+# Development Workflow Guideline
 
-이 문서는 Aequo v1(`docs/IMPLEMENTATION_PLAN.md`) 구현을 진행할 때 따르는 브랜치/커밋 규칙이다.
+This document defines the branch/commit rules to follow while implementing Aequo v1 (`docs/IMPLEMENTATION_PLAN.md`).
 
-## 브랜치 전략
+## Branch Strategy
 
-- v1 기능 구현은 모두 **`release/v1.0.0`** 브랜치에서 진행한다. `main`에는 직접 커밋하지 않는다.
-- `release/v1.0.0`은 `main`에서 분기한다.
-- v1(M0~M11) 전체가 끝나고 `docs/IMPLEMENTATION_PLAN.md`의 체크리스트가 모두 `[x]`가 되면, `release/v1.0.0` → `main` PR을 올려 리뷰 후 머지한다.
-- `main`에는 문서(`docs/`, `CONTRIBUTING.md`, `README.md` 등)만 올라가며, 애플리케이션 코드는 `release/v1.0.0`에서 머지될 때 합류한다.
-- 이후 v1.1.0 등 다음 릴리즈도 같은 패턴(`release/vX.Y.Z`)으로 분기한다.
+- All v1 feature work happens on the **`release/v1.0.0`** branch. Do not commit directly to `main`.
+- `release/v1.0.0` branches off of `main`.
+- Once all of v1 (M0–M11) is complete and every checkbox in `docs/IMPLEMENTATION_PLAN.md` is `[x]`, open a `release/v1.0.0` → `main` PR, review it, and merge.
+- `main` holds only documentation (`docs/`, `CONTRIBUTING.md`, `README.md`, etc.); application code joins `main` only when `release/v1.0.0` is merged in.
+- Future releases (v1.1.0, etc.) follow the same pattern (`release/vX.Y.Z`).
 
-## 커밋 단위
+## Commit Granularity
 
-- **`docs/IMPLEMENTATION_PLAN.md`의 체크리스트 항목 1개 = 커밋 1개.**
-- 한 커밋에 여러 체크리스트 항목을 묶지 않는다. 항목이 너무 작아 보여도(예: "인덱스 생성") 별도 커밋으로 남긴다 — 리뷰·되돌리기(revert)가 쉬워짐.
-- 커밋을 완료하면 같은 커밋(또는 바로 다음 커밋)에서 해당 체크리스트 항목을 `[ ]` → `[x]`로 갱신한다. 코드와 계획서 상태가 항상 일치해야 한다.
-- 마일스톤(M0~M11) 순서를 따른다. 다만 M3(백엔드 fetch)와 M7(UI 뼈대)처럼 계획서에 병행 가능하다고 표시된 경우는 순서를 바꿔도 된다.
-- 13장 로드맵(범위 밖) 항목은 이 브랜치에서 커밋하지 않는다.
+- **One checklist item in `docs/IMPLEMENTATION_PLAN.md` = one commit.**
+- Don't bundle multiple checklist items into a single commit. Even if an item looks tiny (e.g., "create indexes"), give it its own commit — this keeps review and reverts easy.
+- When a commit completes an item, update that checklist item from `[ ]` to `[x]` in the same commit (or the very next one). Code state and plan state must always stay in sync.
+- Follow the milestone order (M0–M11). Exceptions are milestones explicitly marked as parallelizable in the plan (e.g., M3 backend fetch and M7 UI skeleton).
+- Do not commit anything from the Chapter 13 roadmap (out-of-scope items) on this branch.
 
-## 커밋 메시지 (Conventional Commits)
+## Commit Message Format (Conventional Commits)
 
-형식: `<type>(<scope>): <설명> (M<번호>)`
+Format: `<type>(<scope>): <description> (M<number>)`
 
-- **type**: `feat` / `fix` / `test` / `docs` / `chore` / `refactor` 중 하나
-- **scope**: 해당 작업이 속한 영역 (`db`, `fetch`, `scheduler`, `ui`, `commands` 등). 계획서의 모듈 구조(`src-tauri/src/{commands,db,fetch,scheduler}`)를 그대로 쓴다.
-- **설명**: 한글/영문 무관, 명령형("추가한다"가 아니라 "추가")
-- 끝에 해당 마일스톤 번호를 `(M숫자)`로 표기해 계획서와 추적 가능하게 한다.
+- **type**: one of `feat` / `fix` / `test` / `docs` / `chore` / `refactor`
+- **scope**: the area the work belongs to (`db`, `fetch`, `scheduler`, `ui`, `commands`, etc.) — use the module structure from the plan (`src-tauri/src/{commands,db,fetch,scheduler}`)
+- **description**: imperative mood (e.g., "add" not "added")
+- End with the milestone number as `(M<number>)` so commits stay traceable against the plan
 
-예시:
+Examples:
 ```
-feat(db): feeds/items 테이블 스키마 작성 (M1)
-feat(db): idx_items_published, idx_items_unread 인덱스 추가 (M1)
-feat(fetch): ETag/Last-Modified 조건부 요청 적용 (M3)
-test(fetch): wiremock으로 304/200/timeout 시나리오 검증 (M3)
-fix(scheduler): 유휴 시 busy-loop 대신 sleep_until 사용 (M4)
-docs: M1 체크리스트 완료 표시
+feat(db): add feeds/items table schema (M1)
+feat(db): add idx_items_published, idx_items_unread indexes (M1)
+feat(fetch): apply ETag/Last-Modified conditional requests (M3)
+test(fetch): verify 304/200/timeout scenarios with wiremock (M3)
+fix(scheduler): use sleep_until instead of busy-loop when idle (M4)
+docs: check off M1 checklist items
 ```
 
-## PR 전 체크
+## Pre-PR Checklist
 
-- [ ] 관련 체크리스트 항목이 전부 `[x]`인가
-- [ ] 해당 마일스톤의 단위/통합 테스트가 통과하는가 (`cargo test`, 프론트엔드 테스트)
-- [ ] `cargo clippy`, lint 경고 없는가
-- [ ] 범위 밖(13장 로드맵) 기능이 섞여 들어가지 않았는가
+- [ ] Are all related checklist items marked `[x]`?
+- [ ] Do the milestone's unit/integration tests pass (`cargo test`, frontend tests)?
+- [ ] No `cargo clippy`/lint warnings?
+- [ ] No out-of-scope (Chapter 13 roadmap) features snuck in?
