@@ -4,10 +4,11 @@
 
 ## 브랜치 전략
 
-- v1 기능 구현은 모두 **`release`** 브랜치에서 진행한다. `main`에는 직접 커밋하지 않는다.
-- `release`는 `main`에서 분기한다.
-- v1(M0~M11) 전체가 끝나고 `docs/IMPLEMENTATION_PLAN.md`의 체크리스트가 모두 `[x]`가 되면, `release` → `main` PR을 올려 리뷰 후 머지한다.
-- `main`에는 문서(`docs/`, `CONTRIBUTING.md`, `README.md` 등)만 올라가며, 애플리케이션 코드는 `release`에서 머지될 때 합류한다.
+- v1 기능 구현은 모두 **`release/v1.0.0`** 브랜치에서 진행한다. `main`에는 직접 커밋하지 않는다.
+- `release/v1.0.0`은 `main`에서 분기한다.
+- v1(M0~M11) 전체가 끝나고 `docs/IMPLEMENTATION_PLAN.md`의 체크리스트가 모두 `[x]`가 되면, `release/v1.0.0` → `main` PR을 올려 리뷰 후 머지한다.
+- `main`에는 문서(`docs/`, `CONTRIBUTING.md`, `README.md` 등)만 올라가며, 애플리케이션 코드는 `release/v1.0.0`에서 머지될 때 합류한다.
+- 이후 v1.1.0 등 다음 릴리즈도 같은 패턴(`release/vX.Y.Z`)으로 분기한다.
 
 ## 커밋 단위
 
