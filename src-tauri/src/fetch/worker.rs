@@ -44,6 +44,20 @@ pub async fn poll_feed(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome
     .await
     .map_err(|e| e.to_string())?;
 
+    apply_fetch(conn, meta, fetched)
+}
+
+/// Applies an already-fetched response to the DB. Split out from
+/// [`poll_feed`] so the Poll Scheduler (M4) can run the network fetch
+/// without holding any DB lock across the await, then call this
+/// synchronously once it has the lock - a `MutexGuard` held across an
+/// `.await` inside a task spawned on `JoinSet`/`tokio::spawn` wouldn't
+/// compile (the guard isn't `Send`).
+pub fn apply_fetch(
+    conn: &Connection,
+    meta: &FeedMeta,
+    fetched: ConditionalFetch,
+) -> Result<PollOutcome, String> {
     let next_fetch_at = now_unix() + meta.interval_secs;
 
     match fetched {

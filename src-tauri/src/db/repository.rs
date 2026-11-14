@@ -81,6 +81,16 @@ pub fn list_feed_metas(conn: &Connection) -> Result<Vec<FeedMeta>> {
     rows.collect()
 }
 
+/// Feeds whose `next_fetch_at` has passed - what the Poll Scheduler
+/// dispatches each cycle (see docs/ARCHITECTURE.md §6.2).
+pub fn list_due_feed_metas(conn: &Connection, now: i64) -> Result<Vec<FeedMeta>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {FEED_META_COLUMNS} FROM feeds WHERE next_fetch_at <= ?1 ORDER BY next_fetch_at"
+    ))?;
+    let rows = stmt.query_map(params![now], row_to_feed_meta)?;
+    rows.collect()
+}
+
 /// Records a `304 Not Modified` response: only the next poll time moves.
 pub fn update_feed_not_modified(conn: &Connection, feed_id: i64, next_fetch_at: i64) -> Result<()> {
     conn.execute(
@@ -336,5 +346,23 @@ mod tests {
         assert_eq!(meta.etag, Some("etag-1".to_string()));
         assert_eq!(meta.last_modified, Some("Mon, 01 Jan 2024".to_string()));
         assert_eq!(meta.next_fetch_at, 999);
+    }
+
+    #[test]
+    fn list_due_feed_metas_filters_by_next_fetch_at() {
+        let conn = init_in_memory().unwrap();
+        let due_feed = insert_feed(&conn, "https://example.com/due.xml", None, None, 0).unwrap();
+        let future_feed =
+            insert_feed(&conn, "https://example.com/future.xml", None, None, 0).unwrap();
+
+        update_feed_not_modified(&conn, due_feed, 1000).unwrap();
+        update_feed_not_modified(&conn, future_feed, 5000).unwrap();
+
+        let due = list_due_feed_metas(&conn, 2000).unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].id, due_feed);
+
+        let all_due = list_due_feed_metas(&conn, 9999).unwrap();
+        assert_eq!(all_due.len(), 2);
     }
 }
