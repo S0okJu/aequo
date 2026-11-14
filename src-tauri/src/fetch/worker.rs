@@ -75,3 +75,73 @@ pub async fn poll_feed(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+
+    const RSS2_FIXTURE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/sample_rss2.xml"
+    ));
+
+    #[tokio::test]
+    async fn poll_feed_200_stores_items_and_updates_meta() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/feed.xml"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(RSS2_FIXTURE)
+                    .insert_header("ETag", "\"abc123\"")
+                    .insert_header("Last-Modified", "Mon, 01 Jan 2024 00:00:00 GMT"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let url = format!("{}/feed.xml", mock_server.uri());
+        let conn = db::init_in_memory().unwrap();
+        let feed_id = db::insert_feed(&conn, &url, None, None, 0).unwrap();
+        let meta = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
+
+        let outcome = poll_feed(&conn, &meta).await.unwrap();
+        assert_eq!(outcome, PollOutcome::Updated { new_item_count: 2 });
+
+        let updated = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(updated.etag, Some("\"abc123\"".to_string()));
+        assert_eq!(
+            updated.last_modified,
+            Some("Mon, 01 Jan 2024 00:00:00 GMT".to_string())
+        );
+        assert!(updated.next_fetch_at > 0);
+    }
+
+    #[tokio::test]
+    async fn poll_feed_304_only_reschedules() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/feed.xml"))
+            .and(header("If-None-Match", "\"etag-1\""))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(&mock_server)
+            .await;
+
+        let url = format!("{}/feed.xml", mock_server.uri());
+        let conn = db::init_in_memory().unwrap();
+        let feed_id = db::insert_feed(&conn, &url, None, None, 0).unwrap();
+        db::update_feed_fetched(&conn, feed_id, Some("\"etag-1\""), None, 0).unwrap();
+        let meta = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
+
+        let outcome = poll_feed(&conn, &meta).await.unwrap();
+        assert_eq!(outcome, PollOutcome::NotModified);
+
+        let updated = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        assert_eq!(updated.etag, Some("\"etag-1\"".to_string())); // untouched by a 304
+        assert!(updated.next_fetch_at > 0); // still rescheduled
+
+        assert_eq!(db::count_unread(&conn, feed_id).unwrap(), 0); // no body was ever parsed
+    }
+}

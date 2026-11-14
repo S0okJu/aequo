@@ -30,6 +30,7 @@ pub async fn fetch_bytes(url: &str) -> Result<Vec<u8>, reqwest::Error> {
 }
 
 /// Outcome of a conditional GET (see ARCHITECTURE.md §4.1, §6.2).
+#[derive(Debug)]
 pub enum ConditionalFetch {
     /// Server returned `304 Not Modified` - no body was sent.
     NotModified,
@@ -49,7 +50,19 @@ pub async fn fetch_conditional(
     etag: Option<&str>,
     last_modified: Option<&str>,
 ) -> Result<ConditionalFetch, reqwest::Error> {
-    let mut request = shared_client().get(url);
+    fetch_conditional_with(shared_client(), url, etag, last_modified).await
+}
+
+/// Same as [`fetch_conditional`], but against an explicit client -
+/// lets tests use a short timeout against a mock server instead of
+/// production's `REQUEST_TIMEOUT`.
+async fn fetch_conditional_with(
+    client: &reqwest::Client,
+    url: &str,
+    etag: Option<&str>,
+    last_modified: Option<&str>,
+) -> Result<ConditionalFetch, reqwest::Error> {
+    let mut request = client.get(url);
     if let Some(etag) = etag {
         request = request.header(reqwest::header::IF_NONE_MATCH, etag);
     }
@@ -81,4 +94,37 @@ fn header_str(response: &reqwest::Response, name: reqwest::header::HeaderName) -
         .get(name)
         .and_then(|v| v.to_str().ok())
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+
+    /// Verifies the timeout mechanism itself (a client built with a
+    /// short timeout errors out against a slow server), rather than
+    /// production's 10s value - that would make this test take 10+
+    /// real seconds for no extra confidence.
+    #[tokio::test]
+    async fn fetch_conditional_errors_on_timeout() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/slow.xml"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(300)))
+            .mount(&mock_server)
+            .await;
+
+        let short_timeout_client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(50))
+            .build()
+            .unwrap();
+
+        let url = format!("{}/slow.xml", mock_server.uri());
+        let result = fetch_conditional_with(&short_timeout_client, &url, None, None).await;
+
+        let err = result.expect_err("expected a timeout error");
+        assert!(err.is_timeout());
+    }
 }

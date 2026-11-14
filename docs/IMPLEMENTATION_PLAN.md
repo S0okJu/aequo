@@ -48,7 +48,7 @@
   - [x] `304 Not Modified` → exit immediately with no body download/parsing, update only `next_fetch_at`
   - [x] `200 OK` → parse → insert only new items (ignore UNIQUE conflicts) → update `etag`/`last_modified`/`next_fetch_at`
 - [x] Set a timeout per request (e.g., 10s)
-- [ ] Integration tests: verify all three scenarios (304/200/timeout) using `wiremock`
+- [x] Integration tests: verify all three scenarios (304/200/timeout) using `wiremock`
 
 ## M4. Bounded Concurrency & Poll Scheduler
 
