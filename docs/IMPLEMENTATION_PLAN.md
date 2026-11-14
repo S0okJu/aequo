@@ -15,7 +15,7 @@
 - [x] Scaffold the Tauri 2.x project (`npm create tauri-app`)
 - [x] Set up the frontend framework (Svelte + TypeScript)
 - [x] Organize the Rust workspace structure (split modules like `src-tauri/src/{commands,db,fetch,scheduler}`)
-- [ ] Add dependencies: `rusqlite` (bundled, WAL), `reqwest` (rustls, gzip), `feed-rs`, `tokio`
+- [x] Add dependencies: `rusqlite` (bundled, WAL), `reqwest` (rustls, gzip), `feed-rs`, `tokio`
 - [ ] Set up `.gitignore` and lint/format config (`rustfmt`, `clippy`, `eslint`/`prettier`)
 - [ ] Get the basic app window running (confirm `tauri dev` works, even with an empty screen)
 - [ ] Generate the Tauri app icon set from `img/logo.png` (`tauri icon img/logo.png`)
