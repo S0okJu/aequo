@@ -5,7 +5,7 @@
 
 <style>
   :root {
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
   }
 
   .placeholder {
