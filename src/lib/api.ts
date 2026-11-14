@@ -9,8 +9,13 @@ export function listFeeds(): Promise<FeedSummary[]> {
   return invoke('list_feeds');
 }
 
-export function listItems(limit: number, offset: number, unreadOnly: boolean): Promise<Item[]> {
-  return invoke('list_items', { limit, offset, unreadOnly });
+export function listItems(
+  limit: number,
+  offset: number,
+  unreadOnly: boolean,
+  feedId: number | null,
+): Promise<Item[]> {
+  return invoke('list_items', { limit, offset, unreadOnly, feedId });
 }
 
 export function markRead(itemId: number): Promise<void> {

@@ -88,7 +88,7 @@
 
 - [x] 3-pane layout: feed list / merged timeline / detail view
 - [x] Feed list: "All" + per-feed unread count (`COUNT(*) WHERE is_read = 0`)
-- [ ] Timeline: sorted by `published_at DESC`, visually distinguishing unread (bold/dot) from read (dimmed)
+- [x] Timeline: sorted by `published_at DESC`, visually distinguishing unread (bold/dot) from read (dimmed)
 - [ ] Apply virtual scrolling — keep DOM node count bounded when rendering thousands of items
 - [ ] Pagination/infinite scroll calling `list_items(limit, offset)`
 - [ ] Call `mark_read` on item open + optimistic UI update

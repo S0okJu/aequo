@@ -45,11 +45,12 @@ pub fn list_items(
     limit: i64,
     offset: i64,
     unread_only: bool,
+    feed_id: Option<i64>,
 ) -> Result<Vec<db::Item>, String> {
     let conn = db_state
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
-    db::list_items(&conn, limit, offset, unread_only).map_err(|e| e.to_string())
+    db::list_items(&conn, limit, offset, unread_only, feed_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

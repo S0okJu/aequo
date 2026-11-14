@@ -187,22 +187,41 @@ const ITEM_COLUMNS: &str =
     "id, feed_id, guid_hash, title, link, summary, published_at, fetched_at, is_read";
 
 /// Lists items merged across all feeds, newest first (§6.3).
+/// Lists items for the merged timeline, newest first (§6.3). `feed_id`
+/// narrows to one feed (the sidebar's per-feed selection); `None` is
+/// the default "All" view across every feed.
 pub fn list_items(
     conn: &Connection,
     limit: i64,
     offset: i64,
     unread_only: bool,
+    feed_id: Option<i64>,
 ) -> Result<Vec<Item>> {
-    let sql = if unread_only {
-        format!(
-            "SELECT {ITEM_COLUMNS} FROM items WHERE is_read = 0 \
-             ORDER BY published_at DESC LIMIT ?1 OFFSET ?2"
-        )
+    let mut conditions: Vec<&str> = Vec::new();
+    let mut sql_params: Vec<&dyn rusqlite::ToSql> = Vec::new();
+
+    if unread_only {
+        conditions.push("is_read = 0");
+    }
+    if let Some(ref id) = feed_id {
+        conditions.push("feed_id = ?");
+        sql_params.push(id);
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
     } else {
-        format!("SELECT {ITEM_COLUMNS} FROM items ORDER BY published_at DESC LIMIT ?1 OFFSET ?2")
+        format!("WHERE {}", conditions.join(" AND "))
     };
+
+    sql_params.push(&limit);
+    sql_params.push(&offset);
+
+    let sql = format!(
+        "SELECT {ITEM_COLUMNS} FROM items {where_clause} ORDER BY published_at DESC LIMIT ? OFFSET ?"
+    );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params![limit, offset], row_to_item)?;
+    let rows = stmt.query_map(sql_params.as_slice(), row_to_item)?;
     rows.collect()
 }
 
@@ -271,7 +290,7 @@ mod tests {
         let second_pass = upsert_items(&conn, feed_id, &[sample_item("guid-1")]).unwrap();
         assert_eq!(second_pass, 0);
 
-        let items = list_items(&conn, 10, 0, false).unwrap();
+        let items = list_items(&conn, 10, 0, false, None).unwrap();
         assert_eq!(items.len(), 1);
     }
 
@@ -288,7 +307,7 @@ mod tests {
 
         assert_eq!(count_unread(&conn, feed_id).unwrap(), 2);
 
-        let items = list_items(&conn, 10, 0, false).unwrap();
+        let items = list_items(&conn, 10, 0, false, None).unwrap();
         mark_read(&conn, items[0].id).unwrap();
         assert_eq!(count_unread(&conn, feed_id).unwrap(), 1);
 
@@ -307,12 +326,42 @@ mod tests {
         )
         .unwrap();
 
-        let all_items = list_items(&conn, 10, 0, false).unwrap();
+        let all_items = list_items(&conn, 10, 0, false, None).unwrap();
         mark_read(&conn, all_items[0].id).unwrap();
 
-        let unread_items = list_items(&conn, 10, 0, true).unwrap();
+        let unread_items = list_items(&conn, 10, 0, true, None).unwrap();
         assert_eq!(unread_items.len(), 1);
         assert!(!unread_items[0].is_read);
+    }
+
+    #[test]
+    fn list_items_feed_id_filters_to_one_feed() {
+        let conn = init_in_memory().unwrap();
+        let feed_a = insert_feed(&conn, "https://example.com/a.xml", None, None, 0).unwrap();
+        let feed_b = insert_feed(&conn, "https://example.com/b.xml", None, None, 0).unwrap();
+        upsert_items(
+            &conn,
+            feed_a,
+            &[sample_item("guid-a1"), sample_item("guid-a2")],
+        )
+        .unwrap();
+        upsert_items(&conn, feed_b, &[sample_item("guid-b1")]).unwrap();
+
+        let all_items = list_items(&conn, 10, 0, false, None).unwrap();
+        assert_eq!(all_items.len(), 3);
+
+        let feed_a_items = list_items(&conn, 10, 0, false, Some(feed_a)).unwrap();
+        assert_eq!(feed_a_items.len(), 2);
+        assert!(feed_a_items.iter().all(|item| item.feed_id == feed_a));
+
+        let feed_b_items = list_items(&conn, 10, 0, false, Some(feed_b)).unwrap();
+        assert_eq!(feed_b_items.len(), 1);
+
+        // Combined with unread_only: mark one of feed_a's items read,
+        // confirm the filters compose (WHERE ... AND ...).
+        mark_read(&conn, feed_a_items[0].id).unwrap();
+        let feed_a_unread = list_items(&conn, 10, 0, true, Some(feed_a)).unwrap();
+        assert_eq!(feed_a_unread.len(), 1);
     }
 
     #[test]

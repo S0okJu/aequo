@@ -4,8 +4,10 @@
   import FeedList from '$lib/components/FeedList.svelte';
   import Timeline from '$lib/components/Timeline.svelte';
   import DetailView from '$lib/components/DetailView.svelte';
-  import { listFeeds } from '$lib/api';
-  import type { FeedSummary } from '$lib/types';
+  import { listFeeds, listItems } from '$lib/api';
+  import type { FeedSummary, Item } from '$lib/types';
+
+  const PAGE_SIZE = 50;
 
   interface FeedUpdatedPayload {
     feedId: number;
@@ -13,18 +15,33 @@
   }
 
   let feeds = $state<FeedSummary[]>([]);
+  let items = $state<Item[]>([]);
   let selectedFeedId = $state<number | null>(null);
+  let selectedItemId = $state<number | null>(null);
 
   async function refreshFeeds() {
     feeds = await listFeeds();
   }
 
+  // First page of the merged timeline (§6.3) for the current feed
+  // selection. Infinite scroll appends further pages - M7 item 5.
+  async function refreshItems() {
+    items = await listItems(PAGE_SIZE, 0, false, selectedFeedId);
+  }
+
+  function selectFeed(feedId: number | null) {
+    selectedFeedId = feedId;
+    refreshItems();
+  }
+
   onMount(() => {
     refreshFeeds();
+    refreshItems();
 
     // Event-driven only (§3.2/§6.2) - no polling timer anywhere here.
     const unlisten = listen<FeedUpdatedPayload>('feed-updated', () => {
       refreshFeeds();
+      refreshItems();
     });
 
     return () => {
@@ -35,10 +52,10 @@
 
 <div class="layout">
   <aside class="pane feed-list-pane">
-    <FeedList {feeds} {selectedFeedId} onSelect={(feedId) => (selectedFeedId = feedId)} />
+    <FeedList {feeds} {selectedFeedId} onSelect={selectFeed} />
   </aside>
   <main class="pane timeline-pane">
-    <Timeline />
+    <Timeline {items} {feeds} {selectedItemId} onSelect={(itemId) => (selectedItemId = itemId)} />
   </main>
   <aside class="pane detail-pane">
     <DetailView />
