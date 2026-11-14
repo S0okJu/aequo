@@ -1,6 +1,12 @@
 //! Row types for the `feeds` and `items` tables (see docs/ARCHITECTURE.md §5).
 
-#[derive(Debug, Clone, PartialEq)]
+use serde::Serialize;
+
+/// `Feed`/`Item` derive `Serialize` since they cross the Tauri IPC
+/// boundary as-is from the M6 query commands (list_feeds/list_items)
+/// - no separate DTO layer for v1, the DB row shape is the view shape.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Feed {
     pub id: i64,
     pub url: String,
@@ -15,7 +21,8 @@ pub struct Feed {
     pub created_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Item {
     pub id: i64,
     pub feed_id: i64,

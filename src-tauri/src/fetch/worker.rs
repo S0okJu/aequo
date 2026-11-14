@@ -4,6 +4,7 @@
 //! concurrency is M4's job - this module only handles one feed at a
 //! time.
 
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
@@ -51,6 +52,34 @@ pub async fn poll_feed(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome
     {
         Ok(fetched) => apply_fetch(conn, meta, fetched),
         Err(err) => record_failure(conn, meta, &client::describe_error(&err)),
+    }
+}
+
+/// Same as [`poll_feed`], for callers holding the connection behind a
+/// `Mutex` (the Poll Scheduler's `Arc<Mutex<_>>`, or Tauri's managed
+/// `State<'_, Mutex<_>>` in the `refresh_feed` command - both deref to
+/// `&Mutex<Connection>`) rather than a plain `&Connection`: the
+/// network fetch runs with no lock held at all, and the lock is only
+/// acquired afterward for the synchronous apply/record step - see
+/// [`apply_fetch`]'s doc for why a `MutexGuard` can't simply wrap the
+/// whole async call.
+pub async fn poll_feed_locked(
+    conn: &Mutex<Connection>,
+    meta: &FeedMeta,
+) -> Result<PollOutcome, String> {
+    let fetched = client::fetch_conditional(
+        &meta.url,
+        meta.etag.as_deref(),
+        meta.last_modified.as_deref(),
+    )
+    .await;
+
+    let guard = conn
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    match fetched {
+        Ok(fetched) => apply_fetch(&guard, meta, fetched),
+        Err(err) => record_failure(&guard, meta, &client::describe_error(&err)),
     }
 }
 

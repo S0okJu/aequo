@@ -12,12 +12,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
+use tauri::{AppHandle, Runtime};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::{Instant, sleep_until};
 
-use crate::db::{self, FeedMeta};
-use crate::fetch::client;
+use crate::db;
+use crate::events::emit_if_updated;
 use crate::fetch::worker::{self, PollOutcome};
 
 /// Max simultaneous fetches (§4.2) - caps connection/CPU spikes as
@@ -35,35 +36,14 @@ fn now_unix() -> i64 {
         .as_secs() as i64
 }
 
-/// Fetches (no DB lock held) then applies (DB lock held only for the
-/// synchronous part) one feed - mirrors [`worker::poll_feed`], but
-/// split so the lock is only ever acquired after the await completes.
-/// See [`worker::apply_fetch`]'s doc for why it can't simply wrap the
-/// whole async call.
-async fn poll_one(conn: &Arc<Mutex<Connection>>, meta: &FeedMeta) -> Result<PollOutcome, String> {
-    let fetched = client::fetch_conditional(
-        &meta.url,
-        meta.etag.as_deref(),
-        meta.last_modified.as_deref(),
-    )
-    .await;
-
-    let guard = conn
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    match fetched {
-        Ok(fetched) => worker::apply_fetch(&guard, meta, fetched),
-        Err(err) => worker::record_failure(&guard, meta, &client::describe_error(&err)),
-    }
-}
-
 /// Polls every feed whose `next_fetch_at` has passed, bounding
 /// concurrent fetches with a semaphore and collecting results via a
 /// `JoinSet` (§4.2). A single feed's failure (network error, bad
-/// parse, panic) is logged and doesn't stop the others. Returns the
+/// parse, panic) is logged and doesn't stop the others. Emits
+/// `feed-updated` (§6.2) for feeds that got new items. Returns the
 /// number of feeds attempted, for callers that want to observe cycle
 /// size.
-pub async fn poll_due_feeds(conn: Arc<Mutex<Connection>>) -> usize {
+pub async fn poll_due_feeds<R: Runtime>(conn: Arc<Mutex<Connection>>, app: AppHandle<R>) -> usize {
     let due = {
         let guard = conn.lock().expect("database lock poisoned");
         db::list_due_feed_metas(&guard, now_unix()).unwrap_or_default()
@@ -78,27 +58,28 @@ pub async fn poll_due_feeds(conn: Arc<Mutex<Connection>>) -> usize {
         let conn = conn.clone();
         set.spawn(async move {
             let _permit = semaphore.acquire().await.expect("semaphore closed");
+            let feed_id = meta.id;
             let url = meta.url.clone();
-            (url, poll_one(&conn, &meta).await)
+            (feed_id, url, worker::poll_feed_locked(&conn, &meta).await)
         });
     }
 
     while let Some(joined) = set.join_next().await {
         match joined {
-            // Recorded to last_error/consecutive_failures already
-            // (§7) - still logged here so failures are visible
-            // without needing to query the DB.
-            Ok((url, Ok(PollOutcome::Failed { error }))) => {
-                eprintln!("poll failed for {url}: {error}")
+            Ok((feed_id, _, Ok(outcome))) => {
+                // Recorded to last_error/consecutive_failures already
+                // (§7) - still logged here so failures are visible
+                // without needing to query the DB.
+                if let PollOutcome::Failed { error } = &outcome {
+                    eprintln!("poll failed for feed {feed_id}: {error}");
+                }
+                emit_if_updated(&app, feed_id, &outcome);
             }
-            // Success: nothing to log. M6 will emit("feed-updated", ...)
-            // here once the frontend exists to receive it.
-            Ok((_, Ok(_))) => {}
             // A hard Err means the DB write itself failed (lock
             // poisoned, disk error, etc.) - an infra problem, not a
             // feed-specific one, so it couldn't be recorded to
             // last_error.
-            Ok((url, Err(err))) => eprintln!("poll failed for {url}: {err}"),
+            Ok((_, url, Err(err))) => eprintln!("poll failed for {url}: {err}"),
             Err(join_err) => eprintln!("fetch task panicked: {join_err}"),
         }
     }
@@ -129,14 +110,14 @@ fn next_wake(conn: &Connection) -> Instant {
 /// feeds, repeats. Call once on app launch as a background task
 /// (§3.1) - never busy-loops or wakes on a fixed short interval
 /// (§4.3): between cycles the task is fully parked by `sleep_until`.
-pub async fn run(conn: Arc<Mutex<Connection>>) {
+pub async fn run<R: Runtime>(conn: Arc<Mutex<Connection>>, app: AppHandle<R>) {
     loop {
         let wake_at = {
             let guard = conn.lock().expect("database lock poisoned");
             next_wake(&guard)
         };
         sleep_until(wake_at).await;
-        poll_due_feeds(conn.clone()).await;
+        poll_due_feeds(conn.clone(), app.clone()).await;
     }
 }
 
@@ -157,6 +138,13 @@ mod tests {
 
     fn shared_conn(conn: Connection) -> Arc<Mutex<Connection>> {
         Arc::new(Mutex::new(conn))
+    }
+
+    /// A real `AppHandle` from Tauri's mock runtime (the `test`
+    /// feature) - `emit_if_updated` needs one to call, but these
+    /// tests don't care whether anything is actually listening.
+    fn mock_app_handle() -> AppHandle<tauri::test::MockRuntime> {
+        tauri::test::mock_app().handle().clone()
     }
 
     /// Indirect but reliable way to verify the semaphore actually
@@ -191,7 +179,7 @@ mod tests {
         let conn = shared_conn(conn);
 
         let start = StdInstant::now();
-        let attempted = poll_due_feeds(conn).await;
+        let attempted = poll_due_feeds(conn, mock_app_handle()).await;
         let elapsed = start.elapsed();
 
         assert_eq!(attempted, 6);
@@ -240,7 +228,7 @@ mod tests {
         .unwrap();
         let conn = shared_conn(conn);
 
-        let attempted = poll_due_feeds(conn.clone()).await;
+        let attempted = poll_due_feeds(conn.clone(), mock_app_handle()).await;
         assert_eq!(attempted, 2);
 
         let guard = conn.lock().unwrap();
@@ -297,7 +285,7 @@ mod tests {
         .unwrap();
         let conn = shared_conn(conn);
 
-        let attempted = poll_due_feeds(conn.clone()).await;
+        let attempted = poll_due_feeds(conn.clone(), mock_app_handle()).await;
         assert_eq!(attempted, 2);
 
         let guard = conn.lock().unwrap();

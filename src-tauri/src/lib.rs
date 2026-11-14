@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+mod events;
 mod fetch;
 mod scheduler;
 
@@ -24,11 +25,18 @@ pub fn run() {
             // UI reads and background-poll writes avoid sharing a lock).
             let scheduler_conn = db::init(&db_path)?;
             let scheduler_conn = Arc::new(Mutex::new(scheduler_conn));
-            tauri::async_runtime::spawn(scheduler::run(scheduler_conn));
+            tauri::async_runtime::spawn(scheduler::run(scheduler_conn, app.handle().clone()));
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::add_feed::add_feed])
+        .invoke_handler(tauri::generate_handler![
+            commands::add_feed::add_feed,
+            commands::refresh_feed::refresh_feed,
+            commands::list_feeds,
+            commands::list_items,
+            commands::mark_read,
+            commands::mark_feed_read,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

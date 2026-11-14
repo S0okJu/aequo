@@ -30,6 +30,7 @@ sha2 = "0.10"
 
 [dev-dependencies]
 wiremock = "0.6"
+tauri = { version = "2", features = ["test"] }
 
 [lints.clippy]
 all = "warn"
