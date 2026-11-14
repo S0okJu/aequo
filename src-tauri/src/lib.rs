@@ -19,6 +19,7 @@ pub fn run() {
             app.manage(Mutex::new(conn));
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![commands::add_feed::add_feed])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

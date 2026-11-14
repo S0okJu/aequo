@@ -33,10 +33,10 @@
 
 - [x] Write a `feed-rs` wrapper — convert RSS/Atom/JSON Feed input into the shared internal model
 - [x] GUID hashing logic: hash the `guid` if present, otherwise hash the normalized `link`
-- [ ] Implement the `add_feed(url)` Tauri command
-  - [ ] Fetch the URL → detect format from `Content-Type` + body (feed-rs auto-detection)
-  - [ ] On successful parse: insert into `feeds` + bulk-insert initial items
-  - [ ] On parse/network failure: return the error as-is to the frontend
+- [x] Implement the `add_feed(url)` Tauri command
+  - [x] Fetch the URL → detect format from `Content-Type` + body (feed-rs auto-detection)
+  - [x] On successful parse: insert into `feeds` + bulk-insert initial items
+  - [x] On parse/network failure: return the error as-is to the frontend
 - [ ] Unit tests: verify parsing results against RSS 2.0 / Atom / JSON Feed sample files
 - [ ] Manual test: register 3–5 real blog RSS feeds
 
