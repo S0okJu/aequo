@@ -71,7 +71,7 @@
 
 - [x] Expose Tauri commands: `add_feed`, `list_feeds`, `list_items`, `mark_read`, `mark_feed_read`, `refresh_feed(feed_id)`
 - [x] `emit("feed-updated", { feedId, newItemCount })` when new items appear
-- [ ] Frontend event listener: re-query only the affected range when the event arrives (the frontend never polls the backend)
+- [x] Frontend event listener: re-query only the affected range when the event arrives (the frontend never polls the backend)
 - [ ] Manual test: confirm the UI updates without a timer when new items show up during polling
 
 ## M7. UI Implementation
