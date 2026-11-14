@@ -76,3 +76,43 @@ pub async fn add_feed(db_state: State<'_, Mutex<Connection>>, url: String) -> Re
         .map_err(|_| "database lock poisoned".to_string())?;
     store_feed(&conn, &url, &parsed)
 }
+
+#[cfg(test)]
+mod manual_network_tests {
+    use super::*;
+
+    /// Registers real blog feeds spanning all three supported formats
+    /// (RSS 2.0, Atom, JSON Feed) through the exact add_feed logic
+    /// (fetch_and_parse + store_feed), end to end against a real
+    /// network. Network-dependent, so it's `#[ignore]`d by default -
+    /// run manually with `cargo test -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn registers_real_blog_feeds() {
+        let urls = [
+            "https://overreacted.io/rss.xml",        // RSS 2.0
+            "https://www.joelonsoftware.com/feed/",  // RSS 2.0
+            "https://blog.rust-lang.org/feed.xml",   // Atom
+            "https://jvns.ca/atom.xml",              // Atom
+            "https://daringfireball.net/feeds/json", // JSON Feed
+        ];
+
+        let conn = crate::db::init_in_memory().unwrap();
+
+        for url in urls {
+            let parsed = fetch_and_parse(url)
+                .await
+                .unwrap_or_else(|e| panic!("fetch+parse failed for {url}: {e}"));
+            let format = fetch::parser::format_label(&parsed);
+            let feed_id = store_feed(&conn, url, &parsed)
+                .unwrap_or_else(|e| panic!("store failed for {url}: {e}"));
+            let item_count = crate::db::count_unread(&conn, feed_id).unwrap();
+
+            println!("{url} -> format={format}, feed_id={feed_id}, items={item_count}");
+            assert!(item_count > 0, "{url} stored zero items");
+        }
+
+        let total_feeds = crate::db::list_feeds(&conn).unwrap().len();
+        assert_eq!(total_feeds, urls.len());
+    }
+}
