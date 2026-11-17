@@ -214,6 +214,16 @@
     height: 100%;
     overflow-y: auto;
     overscroll-behavior: contain;
+    container-type: inline-size;
+  }
+
+  /* A narrow list (reader + AI open) keeps the view title readable by
+     dropping the secondary label and count before squeezing the title. */
+  @container (max-width: 440px) {
+    .feed-context-label,
+    .unread-count {
+      display: none;
+    }
   }
 
   .posts {
@@ -243,7 +253,7 @@
     letter-spacing: 0.06em;
   }
   .feed-context strong {
-    min-width: 0;
+    min-width: 5em;
     flex: 1;
     overflow: hidden;
     color: var(--color-text);

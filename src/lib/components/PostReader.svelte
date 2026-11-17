@@ -9,7 +9,7 @@
   import FeedContent from './FeedContent.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import Spinner from './Spinner.svelte';
-  import { stripSyndicationFooter } from '$lib/format';
+  import { formatDateTime, shortFeedTitle, stripSyndicationFooter } from '$lib/format';
   import type { Annotation, ArticleView, FeedSummary, Item } from '$lib/types';
   import type { CreateAnnotationInput, ReanchoredUpdate } from './FeedContent.svelte';
 
@@ -19,9 +19,20 @@
     onClose: () => void;
     onToggleSaved: (itemId: number) => void;
     onAskAi?: (quotedText: string) => void;
+    /** Whether the AI panel is showing beside this post. */
+    aiOpen?: boolean;
+    onToggleAi?: () => void;
   }
 
-  let { item, feeds, onClose, onToggleSaved, onAskAi }: Props = $props();
+  let {
+    item,
+    feeds,
+    onClose,
+    onToggleSaved,
+    onAskAi,
+    aiOpen = false,
+    onToggleAi,
+  }: Props = $props();
   let article = $state<ArticleView | null>(null);
   let loadingArticle = $state(false);
   let refreshingArticle = $state(false);
@@ -120,13 +131,6 @@
 
   const feed = $derived(feeds.find((entry) => entry.id === item?.feedId));
 
-  function formatTime(unixSecs: number): string {
-    return new Date(unixSecs * 1000).toLocaleString(undefined, {
-      dateStyle: 'long',
-      timeStyle: 'short',
-    });
-  }
-
   const baseUrl = $derived(item?.link ?? feed?.url ?? '');
   const fullArticleLoaded = $derived(Boolean(article?.contentHtml || article?.rssContentHtml));
   const extractedArticleLoaded = $derived(Boolean(article?.contentHtml));
@@ -149,50 +153,71 @@
   <div class="reader-scroll">
     <article class="reader">
       <header class="reader-header">
-        <div class="header-main">
-          <div class="heading">
-            <p class="source">{feed?.title ?? feed?.url ?? 'Unknown feed'}</p>
-            <h1>{item.title ?? '(untitled)'}</h1>
+        <div class="header-bar">
+          <p class="byline">
+            <span class="source">{shortFeedTitle(feed?.title, feed?.url ?? 'Unknown feed')}</span>
+            <span aria-hidden="true">·</span>
             <time datetime={new Date(item.publishedAt * 1000).toISOString()}>
-              {formatTime(item.publishedAt)}
+              {formatDateTime(item.publishedAt)}
             </time>
-          </div>
+          </p>
           <div class="header-buttons">
-            <button class="save-reader" type="button" onclick={() => onToggleSaved(item.id)}
-              ><Icon name={item.isSaved ? 'star' : 'star-outline'} size={14} />
-              {item.isSaved ? 'Saved' : 'Save'}</button
+            <button
+              class="icon-button"
+              class:active={item.isSaved}
+              type="button"
+              aria-label={item.isSaved ? 'Unsave post' : 'Save post'}
+              aria-pressed={item.isSaved}
+              title={item.isSaved ? 'Saved' : 'Save'}
+              onclick={() => onToggleSaved(item.id)}
+              ><Icon name={item.isSaved ? 'star' : 'star-outline'} size={16} /></button
             >
-            <button class="close" type="button" aria-label="Close article" onclick={onClose}
-              ><Icon name="close" size={16} /></button
+            {#if item.link}
+              <!-- eslint-disable svelte/no-navigation-without-resolve -->
+              <a
+                class="icon-button"
+                href={item.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open original site"
+                title="Open original site"><Icon name="external-link" size={16} /></a
+              >
+              <!-- eslint-enable svelte/no-navigation-without-resolve -->
+            {/if}
+            {#if extractedArticleLoaded}
+              <button
+                class="icon-button"
+                class:spinning={refreshingArticle}
+                type="button"
+                aria-label="Refresh full text"
+                title={article?.cached
+                  ? 'Refresh full text (showing a cached copy)'
+                  : 'Refresh full text'}
+                disabled={refreshingArticle}
+                onclick={refreshArticle}><Icon name="retry" size={16} /></button
+              >
+            {/if}
+            {#if onToggleAi}
+              <button
+                class="icon-button"
+                class:active={aiOpen}
+                type="button"
+                aria-label={aiOpen ? 'Close AI panel' : 'Ask AI about this post'}
+                aria-pressed={aiOpen}
+                title={aiOpen ? 'Close AI panel' : 'Ask AI'}
+                onclick={onToggleAi}><Icon name="ask-ai" size={16} /></button
+              >
+            {/if}
+            <button
+              class="icon-button"
+              type="button"
+              aria-label="Close article"
+              title="Close"
+              onclick={onClose}><Icon name="close" size={16} /></button
             >
           </div>
         </div>
-        {#if item.link}
-          <div class="reader-actions">
-            <div class="article-state" class:full={fullArticleLoaded}>
-              <span class="state-dot"></span>
-              {#if extractedArticleLoaded}Full article{:else if article?.rssContentHtml}Full text
-                from RSS{:else if loadingArticle}Fetching full text…{:else}RSS preview{/if}
-              {#if article?.cached && extractedArticleLoaded}<span class="cached-label"
-                  >· cached</span
-                >{/if}
-            </div>
-            {#if extractedArticleLoaded}
-              <button
-                class="refresh-article"
-                type="button"
-                disabled={refreshingArticle}
-                onclick={refreshArticle}
-              >
-                {refreshingArticle ? 'Refreshing…' : 'Refresh'}
-              </button>
-            {/if}
-            <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-            <a class="original-link" href={item.link} target="_blank" rel="noopener noreferrer">
-              Read original site <Icon name="external-link" size={13} />
-            </a>
-          </div>
-        {/if}
+        <h1>{item.title ?? '(untitled)'}</h1>
       </header>
       {#if (article?.error || articleCommandError) && extractedArticleLoaded}
         <section class="fallback-notice refresh-warning" aria-live="polite">
@@ -231,7 +256,8 @@
       {/if}
       <div bind:this={contentEl}>
         <FeedContent
-          content={article?.contentHtml ?? stripSyndicationFooter(article?.rssContentHtml ?? item.summary)}
+          content={article?.contentHtml ??
+            stripSyndicationFooter(article?.rssContentHtml ?? item.summary)}
           baseUrl={article?.finalUrl ?? baseUrl}
           {annotations}
           onCreateAnnotation={handleCreateAnnotation}
@@ -290,95 +316,77 @@
   }
 
   .reader-header {
-    margin-bottom: 20px;
-    padding-bottom: 18px;
+    margin-bottom: var(--space-5);
+    padding-bottom: var(--space-4);
     border-bottom: 1px solid var(--color-border);
+  }
+
+  .header-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+
+  .byline {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    color: var(--color-text-tertiary);
+    font-size: var(--text-small);
+    white-space: nowrap;
+  }
+
+  .source {
+    overflow: hidden;
+    color: var(--color-text-secondary);
+    font-weight: var(--weight-medium);
+    text-overflow: ellipsis;
   }
 
   .header-buttons {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
-    gap: 8px;
+    gap: 2px;
   }
-  .save-reader {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 34px;
-    padding: 6px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-bg);
+
+  .icon-button {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
     color: var(--color-text-secondary);
-    font: inherit;
-    font-size: var(--text-body);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .save-reader:hover {
-    color: var(--color-accent);
-  }
-
-  .header-main {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 14px;
-  }
-
-  .heading {
-    min-width: 0;
-  }
-
-  .reader-actions {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: flex-end;
-    margin-top: 14px;
-  }
-
-  .article-state {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-right: auto;
-    color: var(--color-text-tertiary);
-    font-size: var(--text-small);
-  }
-
-  .article-state.full {
-    color: var(--color-success);
-  }
-  .state-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--color-text-tertiary);
-  }
-  .article-state.full .state-dot {
-    background: var(--color-success);
-  }
-  .cached-label {
-    opacity: 0.75;
-  }
-
-  .refresh-article {
-    min-height: 34px;
-    padding: 7px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-bg);
-    color: var(--color-text-secondary);
-    font: inherit;
-    font-size: var(--text-small);
     cursor: pointer;
   }
 
-  .refresh-article:hover:not(:disabled) {
-    border-color: var(--color-accent);
+  .icon-button:hover:not(:disabled) {
+    background: var(--color-hover-bg);
+    color: var(--color-text);
+  }
+
+  .icon-button.active {
     color: var(--color-accent);
+  }
+
+  .icon-button:disabled {
+    cursor: default;
+  }
+
+  .icon-button.spinning :global(svg) {
+    animation: spin 0.9s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .fallback-notice,
@@ -435,83 +443,14 @@
     margin-bottom: 0;
   }
 
-  .source {
-    margin: 0 0 8px;
-    color: var(--color-accent);
-    font-size: var(--text-small);
-    font-weight: var(--weight-bold);
-  }
-
   h1 {
-    margin: 0 0 10px;
+    margin: 0;
     color: var(--color-text);
     font-size: var(--text-display);
     font-weight: var(--weight-bold);
-    letter-spacing: -0.025em;
-    line-height: 1.25;
+    letter-spacing: -0.02em;
+    line-height: 1.3;
     word-break: keep-all;
-  }
-
-  time {
-    color: var(--color-text-tertiary);
-    font-size: var(--text-small);
-  }
-
-  .original-link {
-    display: inline-flex;
-    flex-shrink: 0;
-    align-items: center;
-    gap: 8px;
-    min-height: 38px;
-    padding: 8px 12px;
-    border-radius: var(--radius-md);
-    border: 0;
-    background: var(--color-accent-solid);
-    color: var(--color-on-accent);
-    font: inherit;
-    font-size: var(--text-body);
-    font-weight: var(--weight-bold);
-    text-decoration: none;
-    cursor: pointer;
-  }
-
-  .original-link:hover {
-    filter: brightness(0.97);
-  }
-
-  .close {
-    display: grid;
-    width: 34px;
-    height: 34px;
-    place-items: center;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-bg);
-    color: var(--color-text-secondary);
-    font: inherit;
-    cursor: pointer;
-  }
-
-  .close:hover {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
-  }
-
-  @container (max-width: 420px) {
-    .header-main {
-      flex-direction: column-reverse;
-    }
-
-    .header-buttons {
-      width: 100%;
-      justify-content: flex-end;
-    }
-  }
-
-  @container (max-width: 540px) {
-    .reader-actions {
-      justify-content: flex-start;
-    }
   }
 
   .memo-list {

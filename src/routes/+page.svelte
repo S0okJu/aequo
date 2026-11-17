@@ -24,7 +24,6 @@
 
   const PAGE_SIZE = 50;
   const REFRESH_DEBOUNCE_MS = 200;
-  const AI_RAIL_WIDTH = 40;
   const AI_PANEL_OPEN_KEY = 'aequo:aiPanelOpen';
   const SIDEBAR_WIDTH_KEY = 'aequo:sidebarWidth';
   const UNREAD_ONLY_KEY = 'aequo:unreadOnly';
@@ -42,9 +41,9 @@
       const stored = localStorage.getItem(AI_PANEL_OPEN_KEY);
       if (stored !== null) return stored === 'true';
     } catch {
-      // Storage may be unavailable (private mode, etc.) - default to open.
+      // Storage may be unavailable (private mode, etc.) - default to closed.
     }
-    return true;
+    return false;
   }
 
   function initialViewportWidth(): number {
@@ -112,10 +111,14 @@
   // transition can interpolate smoothly instead of snapping - browsers
   // can't animate between differently-shaped track definitions.
   const showReader = $derived(selectedItem !== null);
+  // The AI panel belongs to the open post (§2): it only takes a track while
+  // a post is open, and `aiPanelOpen` remembers whether to bring it back
+  // with the next post.
+  const showAi = $derived(aiPanelOpen && showReader);
   const readerHandleWidth = $derived(showReader ? 6 : 0);
-  const aiHandleWidth = $derived(aiPanelOpen ? 6 : 0);
+  const aiHandleWidth = $derived(showAi ? 6 : 0);
   const minimumReaderWidth = $derived(showReader ? 320 : 0);
-  const minimumAiWidth = $derived(aiPanelOpen ? 300 : AI_RAIL_WIDTH);
+  const minimumAiWidth = $derived(showAi ? 300 : 0);
   const layoutSidebarWidth = $derived(
     Math.min(
       sidebarWidth,
@@ -132,7 +135,7 @@
     ),
   );
   const effectiveAiWidth = $derived(
-    aiPanelOpen
+    showAi
       ? Math.min(
           aiWidth,
           Math.max(
@@ -146,7 +149,7 @@
               aiHandleWidth,
           ),
         )
-      : AI_RAIL_WIDTH,
+      : 0,
   );
   const readerPaneWidth = $derived(
     showReader
@@ -187,7 +190,7 @@
   });
 
   $effect(() => {
-    if (aiPanelOpen && !AiPanelComponent) {
+    if (showAi && !AiPanelComponent) {
       import('$lib/components/AiPanel.svelte').then((module) => {
         AiPanelComponent = module.default;
       });
@@ -641,10 +644,12 @@
           pendingQuote = quotedText;
           aiPanelOpen = true;
         }}
+        aiOpen={showAi}
+        onToggleAi={() => (aiPanelOpen = !aiPanelOpen)}
       />
     </main>
   {/if}
-  {#if aiPanelOpen}
+  {#if showAi}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
     <div
       class="resize-handle ai-resize-handle"
@@ -676,19 +681,6 @@
           <p>Loading AI panel…</p>
         </div>
       {/if}
-    </aside>
-  {:else}
-    <aside class="pane ai-pane ai-rail">
-      <button
-        class="ai-rail-toggle"
-        type="button"
-        aria-label="Open AI panel"
-        title="Open AI panel"
-        onclick={() => (aiPanelOpen = true)}
-      >
-        <span class="ai-rail-chevron"><Icon name="chevron-left" size={14} /></span>
-        <span class="ai-rail-label">AI</span>
-      </button>
     </aside>
   {/if}
 </div>
@@ -772,45 +764,6 @@
   .ai-pane {
     overflow: hidden;
     grid-column: 7 / 8;
-  }
-
-  .ai-rail {
-    background: var(--color-bg-secondary);
-    border-left: 1px solid var(--color-border);
-  }
-
-  .ai-rail-toggle {
-    display: flex;
-    width: 100%;
-    height: 100%;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    border: 0;
-    background: transparent;
-    color: var(--color-text-tertiary);
-    font: inherit;
-    cursor: pointer;
-    transition:
-      background-color var(--transition),
-      color var(--transition);
-  }
-
-  .ai-rail-toggle:hover {
-    background: var(--color-hover-bg);
-    color: var(--color-accent);
-  }
-
-  .ai-rail-chevron {
-    display: flex;
-    align-items: center;
-  }
-
-  .ai-rail-label {
-    font-size: var(--text-caption);
-    font-weight: var(--weight-bold);
-    letter-spacing: 0.06em;
   }
 
   .ai-resize-handle {
