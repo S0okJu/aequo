@@ -9,6 +9,7 @@
   import FeedContent from './FeedContent.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import Spinner from './Spinner.svelte';
+  import { stripSyndicationFooter } from '$lib/format';
   import type { Annotation, ArticleView, FeedSummary, Item } from '$lib/types';
   import type { CreateAnnotationInput, ReanchoredUpdate } from './FeedContent.svelte';
 
@@ -230,7 +231,7 @@
       {/if}
       <div bind:this={contentEl}>
         <FeedContent
-          content={article?.contentHtml ?? article?.rssContentHtml ?? item.summary}
+          content={article?.contentHtml ?? stripSyndicationFooter(article?.rssContentHtml ?? item.summary)}
           baseUrl={article?.finalUrl ?? baseUrl}
           {annotations}
           onCreateAnnotation={handleCreateAnnotation}

@@ -3,8 +3,11 @@
 //! is auto-detected by feed-rs from the content itself - callers don't
 //! need to know which format a feed is in before parsing it.
 
+use std::sync::LazyLock;
+
 use feed_rs::model::{Entry, Feed, FeedType};
 use feed_rs::parser;
+use regex::Regex;
 use sha2::{Digest, Sha256};
 
 use crate::db::NewItem;
@@ -72,8 +75,11 @@ pub fn to_new_items(parsed: &Feed, bytes: &[u8], fetched_at: i64) -> Vec<NewItem
                 guid_hash: guid_hash(entry),
                 title: entry.title.as_ref().map(|t| t.content.clone()),
                 link: entry.links.first().map(|l| l.href.clone()),
-                summary: entry.summary.as_ref().map(|t| t.content.clone()),
-                full_content,
+                summary: entry
+                    .summary
+                    .as_ref()
+                    .and_then(|t| strip_syndication_footer(&t.content)),
+                full_content: full_content.and_then(|body| strip_syndication_footer(&body)),
                 published_at: entry
                     .published
                     .or(entry.updated)
@@ -83,6 +89,30 @@ pub fn to_new_items(parsed: &Feed, bytes: &[u8], fetched_at: i64) -> Vec<NewItem
             }
         })
         .collect()
+}
+
+/// The attribution line WordPress (and plugins copying it) appends to every
+/// syndicated summary/body: `<p>The post <a>Title</a> appeared first on
+/// <a>Site</a>.</p>`, or the same sentence as plain text. Only matched when
+/// it ends the text; the title part is length-capped and the site name must
+/// be a single link or a period-free phrase, so a "The post" sentence in
+/// the article itself can't swallow real content.
+static SYNDICATION_FOOTER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?is)\s*(?:<p\b[^>]*>\s*)?(?-i:The post)\b.{1,400}?\bappeared first on\s+(?:<a\b[^>]*>[^<]{1,120}</a>|[^.<]{1,120})\.?\s*(?:</p>)?\s*$",
+    )
+    .unwrap()
+});
+
+/// Removes a trailing syndication footer; `None` when nothing else is left.
+fn strip_syndication_footer(text: &str) -> Option<String> {
+    let stripped = SYNDICATION_FOOTER.replace(text, "");
+    let trimmed = stripped.trim_end();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 /// Dedup key for an entry: a hash of its guid/id if present, otherwise a
@@ -143,6 +173,55 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/sample_json_feed.json"
     ));
+
+    const WORDPRESS_FIXTURE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/sample_rss2_wordpress.xml"
+    ));
+
+    #[test]
+    fn to_new_items_strips_the_wordpress_syndication_footer() {
+        let items = new_items(WORDPRESS_FIXTURE);
+        assert_eq!(
+            items[0].summary.as_deref(),
+            Some("<p>Anthropic’s Claude Fable 5.2 promises fewer refusals.</p>")
+        );
+        // Lowercase "the post." in the body must not start the match.
+        assert_eq!(
+            items[0].full_content.as_deref(),
+            Some("<p>Full body of the post.</p>")
+        );
+        // Plain-text variant glued onto the previous sentence, with a
+        // title that itself contains periods.
+        assert_eq!(
+            items[1].summary.as_deref(),
+            Some("This week, AWS released AWS Emulator. It")
+        );
+    }
+
+    #[test]
+    fn to_new_items_keeps_text_that_only_resembles_the_footer() {
+        let items = new_items(WORDPRESS_FIXTURE);
+        assert!(
+            items[2]
+                .summary
+                .as_deref()
+                .unwrap()
+                .starts_with("The post office reopened downtown")
+        );
+    }
+
+    #[test]
+    fn strip_syndication_footer_drops_a_footer_only_body() {
+        assert_eq!(
+            strip_syndication_footer("<p>The post <a>X</a> appeared first on <a>Y</a>.</p>"),
+            None
+        );
+        assert_eq!(
+            strip_syndication_footer("No footer here."),
+            Some("No footer here.".to_string())
+        );
+    }
 
     fn new_items(xml: &str) -> Vec<NewItem> {
         let feed = parse(xml.as_bytes()).unwrap();

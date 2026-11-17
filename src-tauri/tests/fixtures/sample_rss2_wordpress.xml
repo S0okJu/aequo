@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>The New Stack | DevOps, Open Source, and Cloud Native News</title>
+    <link>https://thenewstack.example/</link>
+    <description>Syndication footer samples</description>
+    <item>
+      <title>Claude Fable 5.2 vs. Fable 5.1: Fewer refusals</title>
+      <link>https://thenewstack.example/fable-52/</link>
+      <guid>https://thenewstack.example/?p=1</guid>
+      <description><![CDATA[<p>Anthropic’s Claude Fable 5.2 promises fewer refusals.</p>
+<p>The post <a href="https://thenewstack.example/fable-52/">Claude Fable 5.2 vs. Fable 5.1: Fewer refusals</a> appeared first on <a href="https://thenewstack.example">The New Stack</a>.</p>
+]]></description>
+      <content:encoded><![CDATA[<p>Full body of the post.</p><p>The post <a href="https://thenewstack.example/fable-52/">Claude Fable 5.2 vs. Fable 5.1: Fewer refusals</a> appeared first on <a href="https://thenewstack.example">The New Stack</a>.</p>]]></content:encoded>
+    </item>
+    <item>
+      <title>AWS Emulator proves agents need a verification loop. Realism is the hard part.</title>
+      <link>https://thenewstack.example/aws-emulator/</link>
+      <guid>https://thenewstack.example/?p=2</guid>
+      <description>This week, AWS released AWS Emulator. It The post AWS Emulator proves agents need a verification loop. Realism is the hard part. appeared first on The New Stack.</description>
+    </item>
+    <item>
+      <title>A plain post</title>
+      <link>https://thenewstack.example/plain/</link>
+      <guid>https://thenewstack.example/?p=3</guid>
+      <description>The post office reopened downtown, and it appeared first on the local news before spreading. Nothing to strip here because this sentence keeps going after it.</description>
+    </item>
+  </channel>
+</rss>

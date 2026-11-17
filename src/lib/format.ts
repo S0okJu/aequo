@@ -52,6 +52,19 @@ export function formatDayHeading(
   }).format(date);
 }
 
+// Mirrors SYNDICATION_FOOTER in src-tauri/src/fetch/parser.rs. The backend
+// strips it on ingest; this covers items stored before that existed (rows
+// are insert-or-ignore, so their summaries are never rewritten).
+const SYNDICATION_FOOTER =
+  /\s*(?:<p\b[^>]*>\s*)?The post\b[\s\S]{1,400}?\b[Aa]ppeared first on\s+(?:<a\b[^>]*>[^<]{1,120}<\/a>|[^.<]{1,120})\.?\s*(?:<\/p>)?\s*$/;
+
+/** Removes the WordPress "The post … appeared first on …" trailer from feed text. */
+export function stripSyndicationFooter(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const stripped = text.replace(SYNDICATION_FOOTER, '').trimEnd();
+  return stripped || null;
+}
+
 /**
  * Drops the tagline many feeds append to their name ("The New Stack | DevOps,
  * Open Source, …" -> "The New Stack"). Only splits on a spaced separator so

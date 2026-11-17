@@ -3,7 +3,13 @@
   import FeedContent from './FeedContent.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import Spinner from './Spinner.svelte';
-  import { formatDateTime, formatDayHeading, formatRelative, shortFeedTitle } from '$lib/format';
+  import {
+    formatDateTime,
+    formatDayHeading,
+    formatRelative,
+    shortFeedTitle,
+    stripSyndicationFooter,
+  } from '$lib/format';
   import type { FeedFolder, FeedSummary, Item } from '$lib/types';
 
   interface Props {
@@ -161,7 +167,7 @@
           </span>
           <span class="title">{item.title ?? '(untitled)'}</span>
           <FeedContent
-            content={item.summary ?? item.fullContent}
+            content={stripSyndicationFooter(item.summary ?? item.fullContent)}
             baseUrl={item.link ?? feed?.url ?? ''}
             compact
           />

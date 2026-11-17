@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatDayHeading, formatRelative, shortFeedTitle } from './format';
+import { formatDayHeading, formatRelative, shortFeedTitle, stripSyndicationFooter } from './format';
 
 const now = Date.UTC(2026, 10, 17, 12, 0, 0) / 1000;
 
@@ -28,6 +28,34 @@ describe('formatRelative', () => {
 describe('formatDayHeading', () => {
   it('omits the year for the current year', () => {
     expect(formatDayHeading(now, now, 'en')).toBe('Tuesday, November 17');
+  });
+});
+
+describe('stripSyndicationFooter', () => {
+  it('removes the HTML and plain-text footer variants', () => {
+    expect(
+      stripSyndicationFooter(
+        '<p>Body.</p>\n<p>The post <a href="x">A. B.</a> appeared first on <a href="y">Site</a>.</p>',
+      ),
+    ).toBe('<p>Body.</p>');
+    expect(
+      stripSyndicationFooter('In our tests.The post Fable 5.2 appeared first on The New Stack.'),
+    ).toBe('In our tests.');
+  });
+
+  it('leaves look-alike sentences and lowercase mentions alone', () => {
+    const text = 'The post office appeared first on the news. Then it kept going.';
+    expect(stripSyndicationFooter(text)).toBe(text);
+    expect(stripSyndicationFooter('<p>Full body of the post.</p>')).toBe(
+      '<p>Full body of the post.</p>',
+    );
+  });
+
+  it('returns null for empty or footer-only text', () => {
+    expect(stripSyndicationFooter(null)).toBeNull();
+    expect(
+      stripSyndicationFooter('<p>The post <a>X</a> appeared first on <a>Y</a>.</p>'),
+    ).toBeNull();
   });
 });
 

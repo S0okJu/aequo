@@ -550,7 +550,10 @@ Claude Fable 5.2 vs. Fable 5.1: Fewer refusals…
 - §3.1 전체 + `shortFeedTitle()` 유틸 + 상대 시간 유틸(단위 테스트 포함).
 - `PostsFeed.test.ts` 갱신.
 
-### UI2. 요약 꼬리 문구 제거 — [ ]
+### UI2. 요약 꼬리 문구 제거 — [x]
+- 구현 중 결정됨: 꼬리 문구는 `summary`와 `full_content`(RSS 본문) 둘 다에서 지운다(WordPress는 `content:encoded`에도 붙임).
+  `upsert_items`가 `INSERT OR IGNORE`라 기존 행은 갱신되지 않으므로 `format.ts`의 `stripSyndicationFooter`로 목록·리더 표시 시에도 지운다.
+  `pnpm lint`의 clippy `too_many_arguments`(`list_items`, 8개 인자)는 이전부터 실패하던 것으로, UI13에서 필터 구조체로 바꾸며 해결한다.
 - §3.2. 파서 처리 + fixture 테스트 + 프론트 방어 코드.
 
 ### UI3. AI 패널 기본 닫힘 + rail 제거 + 리더 헤더 정리 — [ ]
