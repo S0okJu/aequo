@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '$lib/icons/Icon.svelte';
+  import { t } from '$lib/i18n/index.svelte';
 
   interface Props {
     rect: DOMRect;
@@ -39,7 +40,7 @@
   style:top="{top}px"
   style:left="{left}px"
   role="toolbar"
-  aria-label="Annotate selection"
+  aria-label={t('annotation.toolbar')}
   tabindex="-1"
   onmousedown={(event) => event.preventDefault()}
 >
@@ -48,20 +49,24 @@
       type="button"
       class="swatch"
       style:background="var(--hl-{color})"
-      aria-label="Highlight {color}"
-      title="Highlight {color}"
+      aria-label={t('annotation.highlightColor', { color: t(`color.${color}`) })}
+      title={t('annotation.highlightColor', { color: t(`color.${color}`) })}
       onclick={() => onHighlight(color)}
     ></button>
   {/each}
   <span class="divider" aria-hidden="true"></span>
-  <button type="button" class="action" aria-label="Add memo" title="Add memo" onclick={onMemo}
-    ><Icon name="edit" size={14} /></button
+  <button
+    type="button"
+    class="action"
+    aria-label={t('annotation.addMemo')}
+    title={t('annotation.addMemo')}
+    onclick={onMemo}><Icon name="edit" size={14} /></button
   >
   <button
     type="button"
     class="action"
-    aria-label="Ask AI about selection"
-    title="Ask AI about selection"
+    aria-label={t('annotation.askAi')}
+    title={t('annotation.askAi')}
     onclick={onAskAi}><Icon name="ask-ai" size={14} /></button
   >
 </div>

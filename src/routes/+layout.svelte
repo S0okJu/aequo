@@ -2,10 +2,14 @@
   import { onMount } from 'svelte';
   import { applyThemePreference, getThemePreference } from '$lib/theme';
   import ToastHost from '$lib/components/ToastHost.svelte';
+  import { applyDocumentLanguage } from '$lib/i18n/index.svelte';
 
   let { children } = $props();
 
-  onMount(() => applyThemePreference(getThemePreference()));
+  onMount(() => {
+    applyThemePreference(getThemePreference());
+    applyDocumentLanguage();
+  });
 </script>
 
 {@render children()}

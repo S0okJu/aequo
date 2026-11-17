@@ -1,0 +1,117 @@
+// English UI strings - the source of truth for message keys. Every other
+// locale is typed against `MessageKey`, so a missing translation is a type
+// error. `{name}` placeholders are filled by `t()`; an object value holds
+// plural forms (Intl.PluralRules categories) selected by `params.count`.
+
+const en = {
+  'common.unknownFeed': 'Unknown feed',
+  'common.save': 'Save',
+  'common.saved': 'Saved',
+  'common.savePost': 'Save post',
+  'common.unsavePost': 'Unsave post',
+  'common.close': 'Close',
+  'common.delete': 'Delete',
+  'common.loading': 'Loading',
+  'common.dismiss': 'Dismiss notification',
+  'common.undo': 'Undo',
+
+  'page.resizeSidebar': 'Resize feed navigation',
+  'page.resizeReader': 'Resize article reader',
+  'page.resizeAi': 'Resize AI panel',
+  'page.loadingAi': 'Loading AI panel…',
+  'page.manageFeeds': 'Manage feeds',
+
+  'toast.markReadFailed': "Couldn't mark post as read",
+  'toast.markAllReadFailed': "Couldn't mark posts as read",
+  'toast.markedRead': { one: 'Marked {count} post as read', other: 'Marked {count} posts as read' },
+  'toast.undoFailed': "Couldn't undo",
+  'toast.saveFailed': "Couldn't update saved state",
+  'toast.feedAdded': 'Feed added',
+
+  'posts.label.all': 'All',
+  'posts.label.today': 'Today',
+  'posts.label.starred': 'Starred',
+  'posts.label.feed': 'Feed',
+  'posts.label.folder': 'Folder',
+  'posts.title.all': 'All posts',
+  'posts.title.today': 'Today',
+  'posts.title.starred': 'Starred',
+  'posts.unreadCount': { one: '{count} unread', other: '{count} unread' },
+  'posts.unreadMarker': 'Unread',
+  'posts.filter.label': 'Show posts',
+  'posts.filter.all': 'All',
+  'posts.filter.unread': 'Unread',
+  'posts.markAllRead': 'Mark all as read',
+  'posts.empty.starredTitle': 'No starred posts',
+  'posts.empty.starredBody': "Star a post to come back to it later - it'll show up here.",
+  'posts.empty.caughtUpTitle': 'All caught up',
+  'posts.empty.caughtUpBody': "There's nothing unread here. Switch to All to see read posts.",
+  'posts.empty.noneTitle': 'No posts yet',
+  'posts.empty.noneBody': 'New posts from your subscriptions will show up here.',
+
+  'reader.openOriginal': 'Open original site',
+  'reader.refreshFullText': 'Refresh full text',
+  'reader.refreshFullTextCached': 'Refresh full text (showing a cached copy)',
+  'reader.askAi': 'Ask AI about this post',
+  'reader.askAiShort': 'Ask AI',
+  'reader.closeAi': 'Close AI panel',
+  'reader.closeArticle': 'Close article',
+  'reader.savedFullTextTitle': 'Showing the saved full text',
+  'reader.tryRefreshAgain': 'Try refresh again',
+  'reader.tryingAgain': 'Trying again…',
+  'reader.rssVersionTitle': 'Showing the RSS version',
+  'reader.tryFullTextAgain': 'Try full text again',
+  'reader.loadingFullTitle': 'Loading the full article',
+  'reader.loadingFullBody': 'Only requested because you opened this post.',
+  'reader.memosTitle': "This post's memos",
+  'reader.positionNotFound': 'Position not found',
+  'reader.selectPost': 'Select a post to read it.',
+
+  'addFeed.placeholder': 'Add feed URL…',
+  'addFeed.urlLabel': 'Feed URL',
+  'addFeed.submit': 'Add feed',
+  'addFeed.submitting': 'Adding…',
+
+  'addFeed.errorScheme': 'Feed URL must start with http:// or https://',
+  'addFeed.errorInvalid': "That doesn't look like a valid URL",
+  'addFeed.errorDuplicate': "You're already subscribed to this feed",
+  'addFeed.errorTimeout': 'The request timed out - the site may be slow or unreachable',
+  'addFeed.errorUnreachable': "Couldn't reach that address - check the URL and try again",
+  'addFeed.errorUnsupported': "That page doesn't look like a supported feed",
+  'addFeed.errorGeneric': 'Something went wrong adding that feed. Please try again.',
+
+  'annotation.highlightOptions': 'Highlight options',
+  'annotation.memo': 'Memo',
+  'annotation.changeColor': 'Change color to {color}',
+  'annotation.removeHighlight': 'Remove highlight',
+  'annotation.notePlaceholder': 'Add a note…',
+  'annotation.toolbar': 'Annotate selection',
+  'annotation.addMemo': 'Add memo',
+  'annotation.askAi': 'Ask AI about selection',
+  'annotation.highlightColor': 'Highlight {color}',
+  'annotation.openMemo': 'Open memo',
+  'annotation.truncated': 'The selection is long, so only part of it is quoted',
+  'color.yellow': 'yellow',
+  'color.green': 'green',
+  'color.blue': 'blue',
+  'color.pink': 'pink',
+  'color.purple': 'purple',
+
+  'content.noPreview': 'No preview available.',
+  'content.openVideo': 'Open video',
+  'content.openVideoChannel': 'Open video channel',
+
+  'content.noPreviewPost': 'No preview available for this post.',
+  'content.openVideoHost': 'Open video ({host})',
+
+  'settings.language': 'Language',
+  'settings.languageHint': 'System follows your operating system language.',
+  'settings.language.system': 'System',
+  'settings.language.en': 'English',
+  'settings.language.ko': '한국어',
+} as const;
+
+export type MessageKey = keyof typeof en;
+export type Message = string | { one?: string; other: string };
+
+export default en as Record<MessageKey, Message>;

@@ -30,6 +30,17 @@ pub fn format_label(feed: &Feed) -> &'static str {
     }
 }
 
+/// The feed's declared language as a BCP 47-ish tag (`"ko"`, `"en-US"`),
+/// trimmed; `None` when the feed doesn't say. Used to tell the AI which
+/// language to answer in and to set `lang` on rendered articles.
+pub fn feed_language(feed: &Feed) -> Option<String> {
+    feed.language
+        .as_deref()
+        .map(str::trim)
+        .filter(|lang| !lang.is_empty() && lang.len() <= 35)
+        .map(str::to_string)
+}
+
 /// Converts a parsed feed's entries into `NewItem`s ready for
 /// `db::upsert_items`. Shared by `add_feed` (initial fetch) and the
 /// fetch worker (polling), so dedup/field-mapping logic lives in one
@@ -209,6 +220,19 @@ mod tests {
                 .unwrap()
                 .starts_with("The post office reopened downtown")
         );
+    }
+
+    #[test]
+    fn feed_language_reads_the_declared_language() {
+        let with = r#"<?xml version="1.0"?><rss version="2.0"><channel><title>T</title>
+            <language> ko-KR </language><item><title>A</title><guid>a</guid></item></channel></rss>"#;
+        let without = r#"<?xml version="1.0"?><rss version="2.0"><channel><title>T</title>
+            <item><title>A</title><guid>a</guid></item></channel></rss>"#;
+        assert_eq!(
+            feed_language(&parse(with.as_bytes()).unwrap()).as_deref(),
+            Some("ko-kr") // feed-rs lowercases; tags are case-insensitive
+        );
+        assert_eq!(feed_language(&parse(without.as_bytes()).unwrap()), None);
     }
 
     #[test]

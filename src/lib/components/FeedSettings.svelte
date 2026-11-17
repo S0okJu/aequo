@@ -6,6 +6,12 @@
   import { applyThemePreference, getThemePreference, type ThemePreference } from '$lib/theme';
   import { showToast } from '$lib/toast.svelte.ts';
   import {
+    getLocalePreference,
+    setLocalePreference,
+    t,
+    type LocalePreference,
+  } from '$lib/i18n/index.svelte';
+  import {
     deleteFeed,
     refreshFeed,
     getRetentionSettings,
@@ -450,6 +456,20 @@
             <option value="dark">Dark</option>
           </select>
           <small>System follows your operating system's appearance setting.</small>
+        </label>
+        <label class="theme-control">
+          <span>{t('settings.language')}</span>
+          <select
+            value={getLocalePreference()}
+            aria-label={t('settings.language')}
+            onchange={(event) =>
+              setLocalePreference(event.currentTarget.value as LocalePreference)}
+          >
+            <option value="system">{t('settings.language.system')}</option>
+            <option value="en">{t('settings.language.en')}</option>
+            <option value="ko">{t('settings.language.ko')}</option>
+          </select>
+          <small>{t('settings.languageHint')}</small>
         </label>
       </section>
     </div>

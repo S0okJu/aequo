@@ -5,6 +5,7 @@
   import FeedSettings from '$lib/components/FeedSettings.svelte';
   import { listFeedFolders, listFeeds } from '$lib/api';
   import { showToast } from '$lib/toast.svelte.ts';
+  import { t } from '$lib/i18n/index.svelte';
   import type { FeedFolder, FeedSummary } from '$lib/types';
 
   let feeds = $state<FeedSummary[]>([]);
@@ -35,7 +36,7 @@
 
   async function handleFeedAdded() {
     await refresh();
-    showToast('Feed added', { type: 'success' });
+    showToast(t('toast.feedAdded'), { type: 'success' });
   }
 </script>
 

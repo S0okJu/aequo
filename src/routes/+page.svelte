@@ -10,6 +10,7 @@
   import Icon from '$lib/icons/Icon.svelte';
   import Spinner from '$lib/components/Spinner.svelte';
   import { showToast } from '$lib/toast.svelte.ts';
+  import { t } from '$lib/i18n/index.svelte';
   import {
     listFeeds,
     listFeedFolders,
@@ -285,7 +286,7 @@
     try {
       ids = await markItemsRead({ ...currentFilter(), unreadOnly: false }, viewLoadedAt);
     } catch (error) {
-      showToast("Couldn't mark posts as read", { type: 'error' });
+      showToast(t('toast.markAllReadFailed'), { type: 'error' });
       console.error('mark_items_read failed:', error);
       return;
     }
@@ -293,8 +294,8 @@
     const marked = new Set(ids);
     for (const item of items) if (marked.has(item.id)) item.isRead = true;
     await refreshFeeds();
-    showToast(`Marked ${ids.length} ${ids.length === 1 ? 'post' : 'posts'} as read`, {
-      action: { label: 'Undo', run: () => undoMarkAllRead(ids) },
+    showToast(t('toast.markedRead', { count: ids.length }), {
+      action: { label: t('common.undo'), run: () => undoMarkAllRead(ids) },
     });
   }
 
@@ -302,7 +303,7 @@
     try {
       await markItemsUnread(ids);
     } catch (error) {
-      showToast("Couldn't undo", { type: 'error' });
+      showToast(t('toast.undoFailed'), { type: 'error' });
       console.error('mark_items_unread failed:', error);
       return;
     }
@@ -385,7 +386,7 @@
     } catch (err) {
       item.isRead = false;
       if (feed) feed.unreadCount += 1;
-      showToast("Couldn't mark post as read", { type: 'error' });
+      showToast(t('toast.markReadFailed'), { type: 'error' });
       console.error('mark_read failed:', err);
     }
   }
@@ -412,7 +413,7 @@
       if (selectedStarred && previous) {
         items = [...items, item].sort((a, b) => b.publishedAt - a.publishedAt || b.id - a.id);
       }
-      showToast("Couldn't update saved state", { type: 'error' });
+      showToast(t('toast.saveFailed'), { type: 'error' });
       console.error('set_item_saved failed:', error);
     }
   }
@@ -573,14 +574,14 @@
     </div>
     <button class="settings-button" onclick={() => goto(resolve('/settings'))}>
       <Icon name="settings" size={14} />
-      Manage feeds
+      {t('page.manageFeeds')}
     </button>
   </aside>
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <div
     class="resize-handle sidebar-resize-handle"
     role="separator"
-    aria-label="Resize feed navigation"
+    aria-label={t('page.resizeSidebar')}
     aria-orientation="vertical"
     aria-valuemin={160}
     aria-valuemax={clampSidebarWidth(360)}
@@ -621,7 +622,7 @@
     <div
       class="resize-handle"
       role="separator"
-      aria-label="Resize article reader"
+      aria-label={t('page.resizeReader')}
       aria-orientation="vertical"
       aria-valuemin={320}
       aria-valuemax={clampReaderWidth(760)}
@@ -654,7 +655,7 @@
     <div
       class="resize-handle ai-resize-handle"
       role="separator"
-      aria-label="Resize AI panel"
+      aria-label={t('page.resizeAi')}
       aria-orientation="vertical"
       aria-valuemin={300}
       aria-valuemax={560}
@@ -678,7 +679,7 @@
       {:else}
         <div class="empty-placeholder" role="status">
           <Spinner size={20} />
-          <p>Loading AI panel…</p>
+          <p>{t('page.loadingAi')}</p>
         </div>
       {/if}
     </aside>

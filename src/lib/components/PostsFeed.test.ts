@@ -20,6 +20,7 @@ const feeds: FeedSummary[] = [
     unreadCount: 1,
     folderId: null,
     hiddenFromAll: false,
+    language: null,
   },
 ];
 

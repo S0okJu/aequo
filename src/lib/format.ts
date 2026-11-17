@@ -1,7 +1,8 @@
 // Shared display formatting for dates and feed names, so every pane renders
 // the same string for the same value (docs/UI_SIMPLIFICATION_PLAN.md §3.1,
-// §3.15). `locale` stays optional until the app-language setting lands;
-// `undefined` means "the system locale".
+// §3.15). `locale` defaults to the app language (src/lib/i18n).
+
+import { currentLocale } from '$lib/i18n/index.svelte';
 
 const MINUTE = 60;
 const HOUR = 60 * MINUTE;
@@ -11,7 +12,7 @@ const DAY = 24 * HOUR;
 export function formatRelative(
   unixSecs: number,
   nowSecs = Date.now() / 1000,
-  locale?: string,
+  locale: string = currentLocale(),
 ): string {
   const elapsed = Math.max(0, nowSecs - unixSecs);
   if (elapsed < DAY) {
@@ -30,7 +31,7 @@ export function formatRelative(
 }
 
 /** Full date and time, for tooltips and the reader header. */
-export function formatDateTime(unixSecs: number, locale?: string): string {
+export function formatDateTime(unixSecs: number, locale: string = currentLocale()): string {
   return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(
     new Date(unixSecs * 1000),
   );
@@ -40,7 +41,7 @@ export function formatDateTime(unixSecs: number, locale?: string): string {
 export function formatDayHeading(
   unixSecs: number,
   nowSecs = Date.now() / 1000,
-  locale?: string,
+  locale: string = currentLocale(),
 ): string {
   const date = new Date(unixSecs * 1000);
   const sameYear = date.getFullYear() === new Date(nowSecs * 1000).getFullYear();

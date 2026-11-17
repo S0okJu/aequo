@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Annotation, AnnotationKind } from '$lib/types';
+  import { t } from '$lib/i18n/index.svelte';
 
   interface Props {
     rect: DOMRect;
@@ -48,7 +49,7 @@
   style:left="{left}px"
   style:width="{POPOVER_WIDTH}px"
   role="dialog"
-  aria-label={kind === 'highlight' ? 'Highlight options' : 'Memo'}
+  aria-label={kind === 'highlight' ? t('annotation.highlightOptions') : t('annotation.memo')}
 >
   {#if kind === 'highlight'}
     <div class="swatches">
@@ -58,26 +59,31 @@
           class="swatch"
           class:active={annotation?.color === color}
           style:background="var(--hl-{color})"
-          aria-label="Change color to {color}"
+          aria-label={t('annotation.changeColor', { color: t(`color.${color}`) })}
           title={color}
           onclick={() => onColorChange(color)}
         ></button>
       {/each}
     </div>
     <div class="actions">
-      <button type="button" class="danger" onclick={onDelete}>Remove highlight</button>
+      <button type="button" class="danger" onclick={onDelete}
+        >{t('annotation.removeHighlight')}</button
+      >
     </div>
   {:else}
-    <textarea bind:value={noteDraft} maxlength={MAX_NOTE_LENGTH} placeholder="Add a note…" rows="4"
-    ></textarea>
+    <textarea
+      bind:value={noteDraft}
+      maxlength={MAX_NOTE_LENGTH}
+      placeholder={t('annotation.notePlaceholder')}
+      rows="4"></textarea>
     <div class="note-footer">
       <span class="count">{noteDraft.length} / {MAX_NOTE_LENGTH}</span>
       <div class="actions">
         {#if annotation}
-          <button type="button" class="danger" onclick={onDelete}>Delete</button>
+          <button type="button" class="danger" onclick={onDelete}>{t('common.delete')}</button>
         {/if}
         <button type="button" class="primary" disabled={!noteDraft.trim()} onclick={save}
-          >Save</button
+          >{t('common.save')}</button
         >
       </div>
     </div>

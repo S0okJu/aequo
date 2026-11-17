@@ -609,7 +609,11 @@ Claude Fable 5.2 vs. Fable 5.1: Fewer refusals…
 - 안 읽은 글만 보기 단계에서 사이드바 숨김 동작(§3.16)도 함께 한다.
 - Rust 단위 테스트: 범위별 일괄 읽음, `before_published_at` 경계, `hidden_from_all` 제외, 검색(§3.14 검색 설계의 테스트 목록).
 
-### UI14. 언어 · 날짜 형식 — [ ]
+### UI14. 언어 · 날짜 형식 — [x] (기반 + 리더/목록/주석/메인·설정 일부)
+- 구현 중 결정됨: `ko` 사전을 `Record<MessageKey, Message>`로 타입 지정해 번역 누락을 타입 오류로 잡는다(런타임 키 비교 테스트도 함께).
+  `FeedList`(UI5), `AiPanel`(UI9), `FeedSettings`/`FolderSettings`(UI11)는 해당 단계에서 다시 작성하므로 그때 `t()`로 옮긴다 — 지금 옮기면 두 번 작업하게 된다.
+  언어 선택은 설정 Appearance 탭에 임시로 두었다(UI11에서 "일반"으로 이동). `feeds.language`는 피드 추가 때와 매 수집 때 갱신되고(feed-rs가 소문자로 정규화),
+  리더 본문 래퍼에 `lang`으로 붙는다. 테스트 환경은 `test-setup.ts`에서 `en`으로 고정한다.
 - §3.15. i18n 기반(`t()`, 사전, 로케일 스토어, 설정 항목) → `format.ts` 날짜 유틸로 5곳 교체 → 화면별 문구 이전 → `lang` 속성.
 - UI1의 상대 시간 유틸은 여기서 `format.ts`로 합친다. UI1을 먼저 진행한다면 처음부터 `format.ts`에 만든다.
 

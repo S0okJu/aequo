@@ -1,6 +1,7 @@
 <script lang="ts">
   import { toasts, dismissToast } from '$lib/toast.svelte.ts';
   import Icon from '$lib/icons/Icon.svelte';
+  import { t } from '$lib/i18n/index.svelte';
 </script>
 
 {#if toasts.length > 0}
@@ -34,7 +35,7 @@
         <button
           type="button"
           class="toast-dismiss"
-          aria-label="Dismiss notification"
+          aria-label={t('common.dismiss')}
           onclick={() => dismissToast(toast.id)}
         >
           <Icon name="close" size={12} />

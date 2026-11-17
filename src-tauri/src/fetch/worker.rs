@@ -39,20 +39,30 @@ fn now_unix() -> i64 {
         .as_secs() as i64
 }
 
+/// Candidate items from one fetch, plus the feed's declared language
+/// (RSS `<language>` / Atom `xml:lang`; `None` for article-list pages).
+type ParsedFetch = (Vec<NewItem>, Option<String>);
+
 /// Parses a fetched body into candidate items - pure, no DB access, so
 /// it can run before any lock is acquired.
-fn parse_items(meta: &FeedMeta, bytes: &[u8], now: i64) -> Result<Vec<NewItem>, String> {
+fn parse_items(meta: &FeedMeta, bytes: &[u8], now: i64) -> Result<ParsedFetch, String> {
     if meta.format.as_deref() == Some("website") {
         super::webpage::parse(&meta.url, bytes, now).map(|listing| {
-            listing
+            let items = listing
                 .items
                 .into_iter()
                 .filter(|item| item.published_at > meta.last_checked_at)
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (items, None)
         })
     } else {
         parser::parse(bytes)
-            .map(|parsed| parser::to_new_items(&parsed, bytes, now))
+            .map(|parsed| {
+                (
+                    parser::to_new_items(&parsed, bytes, now),
+                    parser::feed_language(&parsed),
+                )
+            })
             .map_err(|e| e.to_string())
     }
 }
@@ -65,15 +75,19 @@ fn parse_items(meta: &FeedMeta, bytes: &[u8], now: i64) -> Result<Vec<NewItem>, 
 fn apply_parsed(
     conn: &Connection,
     meta: &FeedMeta,
-    parsed_items: Result<Vec<NewItem>, String>,
+    parsed_items: Result<ParsedFetch, String>,
     etag: Option<String>,
     last_modified: Option<String>,
     now: i64,
 ) -> Result<PollOutcome, String> {
     match parsed_items {
-        Ok(items) => {
+        Ok((items, language)) => {
             let new_item_count =
                 db::upsert_items(conn, meta.id, &items).map_err(|e| e.to_string())?;
+            if language.is_some() {
+                db::set_feed_language(conn, meta.id, language.as_deref())
+                    .map_err(|e| e.to_string())?;
+            }
 
             db::update_feed_fetched(
                 conn,
@@ -123,7 +137,7 @@ pub async fn poll_feed(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome
         }) => {
             let now = now_unix();
             let mut parsed_items = parse_items(meta, &bytes, now);
-            if let Ok(items) = &mut parsed_items {
+            if let Ok((items, _)) = &mut parsed_items {
                 let has_content =
                     db::guid_hashes_with_full_content(conn, meta.id).unwrap_or_default();
                 enrichment::enrich_missing_full_content(items, &has_content).await;
@@ -169,7 +183,7 @@ pub async fn poll_feed_locked(
         }) => {
             let now = now_unix();
             let mut parsed_items = parse_items(meta, &bytes, now);
-            if let Ok(items) = &mut parsed_items {
+            if let Ok((items, _)) = &mut parsed_items {
                 let has_content = {
                     let guard = conn
                         .lock()

@@ -10,6 +10,7 @@
   import Icon from '$lib/icons/Icon.svelte';
   import Spinner from './Spinner.svelte';
   import { formatDateTime, shortFeedTitle, stripSyndicationFooter } from '$lib/format';
+  import { t } from '$lib/i18n/index.svelte';
   import type { Annotation, ArticleView, FeedSummary, Item } from '$lib/types';
   import type { CreateAnnotationInput, ReanchoredUpdate } from './FeedContent.svelte';
 
@@ -155,7 +156,9 @@
       <header class="reader-header">
         <div class="header-bar">
           <p class="byline">
-            <span class="source">{shortFeedTitle(feed?.title, feed?.url ?? 'Unknown feed')}</span>
+            <span class="source"
+              >{shortFeedTitle(feed?.title, feed?.url ?? t('common.unknownFeed'))}</span
+            >
             <span aria-hidden="true">·</span>
             <time datetime={new Date(item.publishedAt * 1000).toISOString()}>
               {formatDateTime(item.publishedAt)}
@@ -166,9 +169,9 @@
               class="icon-button"
               class:active={item.isSaved}
               type="button"
-              aria-label={item.isSaved ? 'Unsave post' : 'Save post'}
+              aria-label={item.isSaved ? t('common.unsavePost') : t('common.savePost')}
               aria-pressed={item.isSaved}
-              title={item.isSaved ? 'Saved' : 'Save'}
+              title={item.isSaved ? t('common.saved') : t('common.save')}
               onclick={() => onToggleSaved(item.id)}
               ><Icon name={item.isSaved ? 'star' : 'star-outline'} size={16} /></button
             >
@@ -179,8 +182,8 @@
                 href={item.link}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label="Open original site"
-                title="Open original site"><Icon name="external-link" size={16} /></a
+                aria-label={t('reader.openOriginal')}
+                title={t('reader.openOriginal')}><Icon name="external-link" size={16} /></a
               >
               <!-- eslint-enable svelte/no-navigation-without-resolve -->
             {/if}
@@ -189,10 +192,10 @@
                 class="icon-button"
                 class:spinning={refreshingArticle}
                 type="button"
-                aria-label="Refresh full text"
+                aria-label={t('reader.refreshFullText')}
                 title={article?.cached
-                  ? 'Refresh full text (showing a cached copy)'
-                  : 'Refresh full text'}
+                  ? t('reader.refreshFullTextCached')
+                  : t('reader.refreshFullText')}
                 disabled={refreshingArticle}
                 onclick={refreshArticle}><Icon name="retry" size={16} /></button
               >
@@ -202,17 +205,17 @@
                 class="icon-button"
                 class:active={aiOpen}
                 type="button"
-                aria-label={aiOpen ? 'Close AI panel' : 'Ask AI about this post'}
+                aria-label={aiOpen ? t('reader.closeAi') : t('reader.askAi')}
                 aria-pressed={aiOpen}
-                title={aiOpen ? 'Close AI panel' : 'Ask AI'}
+                title={aiOpen ? t('reader.closeAi') : t('reader.askAiShort')}
                 onclick={onToggleAi}><Icon name="ask-ai" size={16} /></button
               >
             {/if}
             <button
               class="icon-button"
               type="button"
-              aria-label="Close article"
-              title="Close"
+              aria-label={t('reader.closeArticle')}
+              title={t('common.close')}
               onclick={onClose}><Icon name="close" size={16} /></button
             >
           </div>
@@ -223,10 +226,10 @@
         <section class="fallback-notice refresh-warning" aria-live="polite">
           <span class="notice-icon"><Icon name="info" size={13} /></span>
           <div>
-            <strong>Showing the saved full text</strong>
+            <strong>{t('reader.savedFullTextTitle')}</strong>
             <p>{article?.error ?? articleCommandError}</p>
             <button type="button" disabled={refreshingArticle} onclick={refreshArticle}>
-              {refreshingArticle ? 'Trying again…' : 'Try refresh again'}
+              {refreshingArticle ? t('reader.tryingAgain') : t('reader.tryRefreshAgain')}
             </button>
           </div>
         </section>
@@ -234,14 +237,14 @@
         <section class="fallback-notice" aria-live="polite">
           <span class="notice-icon"><Icon name="info" size={13} /></span>
           <div>
-            <strong>Showing the RSS version</strong>
+            <strong>{t('reader.rssVersionTitle')}</strong>
             <p>{article?.error ?? articleCommandError}</p>
             <button
               type="button"
               disabled={refreshingArticle || loadingArticle}
               onclick={refreshArticle}
             >
-              {refreshingArticle ? 'Trying again…' : 'Try full text again'}
+              {refreshingArticle ? t('reader.tryingAgain') : t('reader.tryFullTextAgain')}
             </button>
           </div>
         </section>
@@ -249,12 +252,14 @@
         <div class="article-loading">
           <Spinner size={17} />
           <div>
-            <strong>Loading the full article</strong>
-            <p>Only requested because you opened this post.</p>
+            <strong>{t('reader.loadingFullTitle')}</strong>
+            <p>{t('reader.loadingFullBody')}</p>
           </div>
         </div>
       {/if}
-      <div bind:this={contentEl}>
+      <!-- The article keeps its own language (line breaking, hyphenation,
+           screen reader voice), independent of the UI language. -->
+      <div bind:this={contentEl} lang={feed?.language ?? undefined}>
         <FeedContent
           content={article?.contentHtml ??
             stripSyndicationFooter(article?.rssContentHtml ?? item.summary)}
@@ -270,7 +275,7 @@
       </div>
       {#if memos.length > 0}
         <section class="memo-list">
-          <h2>This post's memos</h2>
+          <h2>{t('reader.memosTitle')}</h2>
           <ul>
             {#each memos as memo (memo.id)}
               <li>
@@ -285,7 +290,7 @@
                   >
                   <span class="memo-note">{memo.note}</span>
                   {#if orphanedAnnotationIds.includes(memo.id)}
-                    <span class="memo-orphaned-badge">Position not found</span>
+                    <span class="memo-orphaned-badge">{t('reader.positionNotFound')}</span>
                   {/if}
                 </button>
               </li>
@@ -298,7 +303,7 @@
 {:else}
   <div class="empty-placeholder">
     <span class="empty-placeholder-icon"><Icon name="empty" size={20} /></span>
-    <p>Select a post to read it.</p>
+    <p>{t('reader.selectPost')}</p>
   </div>
 {/if}
 

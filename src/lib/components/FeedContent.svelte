@@ -10,6 +10,7 @@
   import AnnotationPopover from './AnnotationPopover.svelte';
   import SelectionToolbar from './SelectionToolbar.svelte';
   import Icon from '$lib/icons/Icon.svelte';
+  import { t } from '$lib/i18n/index.svelte';
   import { ICONS } from '$lib/icons';
 
   // Fixed, non-user-controlled markup (same path data as the Icon component's
@@ -165,7 +166,7 @@
   }
 
   function sanitizedContent(markup: string | null): string {
-    if (!markup) return '<p>No preview available for this post.</p>';
+    if (!markup) return `<p>${t('content.noPreviewPost')}</p>`;
 
     const source = new DOMParser().parseFromString(markup, 'text/html');
     const output = document.implementation.createHTMLDocument('');
@@ -214,7 +215,7 @@
           link.setAttribute('target', '_blank');
           link.setAttribute('rel', 'noopener noreferrer');
           link.className = 'video-link';
-          link.innerHTML = `Open video (${new URL(href).hostname}) ${EXTERNAL_LINK_ICON_HTML}`;
+          link.innerHTML = `${t('content.openVideoHost', { host: new URL(href).hostname })} ${EXTERNAL_LINK_ICON_HTML}`;
           parent.appendChild(link);
         }
         return;
@@ -259,15 +260,15 @@
 
     source.body.childNodes.forEach((node) => copySafe(node, output.body));
     highlightCodeBlocks(output.body);
-    return output.body.innerHTML.trim() || '<p>No preview available for this post.</p>';
+    return output.body.innerHTML.trim() || `<p>${t('content.noPreviewPost')}</p>`;
   }
 
   function textPreview(markup: string | null): string {
-    if (!markup) return 'No preview available.';
+    if (!markup) return t('content.noPreview');
     const parsed = new DOMParser().parseFromString(markup, 'text/html');
     parsed.querySelectorAll('script, style, noscript').forEach((node) => node.remove());
     const text = (parsed.body.textContent ?? '').replace(/[\t\r\n ]+/g, ' ').trim();
-    if (text.length <= 260) return text || 'No preview available.';
+    if (text.length <= 260) return text || t('content.noPreview');
     return `${text.slice(0, 260).trimEnd()}…`;
   }
 
@@ -275,7 +276,8 @@
   const preview = $derived(textPreview(content));
   const videoHref = $derived(videoLink(content));
   const videoLinkLabel = $derived(
-    content && /클립\s*\(@[A-Za-z0-9._-]+\)/.test(content) ? 'Open video channel' : 'Open video',
+    content && /클립\s*\(@[A-Za-z0-9._-]+\)/.test(content) ? t('content.openVideoChannel')
+      : t('content.openVideo'),
   );
 
   // --- Annotation overlay rendering + self-healing reconciliation ---------
@@ -500,7 +502,7 @@
           type="button"
           class="memo-marker"
           style:top="{marker.top}px"
-          aria-label="Open memo"
+          aria-label={t('annotation.openMemo')}
           onclick={(event) => handleMemoMarkerClick(marker.id, event)}><Icon name="memo" size={14} /></button
         >
       {/each}
@@ -522,7 +524,7 @@
       style:top="{truncationNotice.top - 36}px"
       style:left="{truncationNotice.left}px"
     >
-      선택한 내용이 길어 일부만 인용됩니다
+      {t('annotation.truncated')}
     </div>
   {/if}
 

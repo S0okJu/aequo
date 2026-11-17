@@ -1,6 +1,7 @@
 <script lang="ts">
   import { addFeed } from '$lib/api';
   import Icon from '$lib/icons/Icon.svelte';
+  import { t } from '$lib/i18n/index.svelte';
 
   interface Props {
     onAdded: () => void;
@@ -17,22 +18,20 @@
       const parsed = new URL(trimmed);
       return parsed.protocol === 'http:' || parsed.protocol === 'https:'
         ? null
-        : 'Feed URL must start with http:// or https://';
+        : t('addFeed.errorScheme');
     } catch {
-      return "That doesn't look like a valid URL";
+      return t('addFeed.errorInvalid');
     }
   }
 
   function friendlyFeedError(err: unknown): string {
     const raw = String(err);
-    if (raw.includes('UNIQUE constraint')) return "You're already subscribed to this feed";
-    if (raw.toLowerCase().includes('timed out'))
-      return 'The request timed out - the site may be slow or unreachable';
+    if (raw.includes('UNIQUE constraint')) return t('addFeed.errorDuplicate');
+    if (raw.toLowerCase().includes('timed out')) return t('addFeed.errorTimeout');
     if (raw.toLowerCase().includes('dns') || raw.toLowerCase().includes('could not resolve'))
-      return "Couldn't reach that address - check the URL and try again";
-    if (raw.toLowerCase().includes('not a supported feed'))
-      return "That page doesn't look like a supported feed";
-    return 'Something went wrong adding that feed. Please try again.';
+      return t('addFeed.errorUnreachable');
+    if (raw.toLowerCase().includes('not a supported feed')) return t('addFeed.errorUnsupported');
+    return t('addFeed.errorGeneric');
   }
 
   async function handleSubmit(event: SubmitEvent) {
@@ -64,13 +63,13 @@
   <div class="add-feed-row">
     <input
       type="url"
-      placeholder="Add feed URL…"
+      placeholder={t('addFeed.placeholder')}
       bind:value={url}
       disabled={submitting}
-      aria-label="Feed URL"
+      aria-label={t('addFeed.urlLabel')}
     />
     <button type="submit" disabled={submitting || !url.trim()}>
-      {submitting ? 'Adding…' : 'Add feed'}
+      {submitting ? t('addFeed.submitting') : t('addFeed.submit')}
     </button>
   </div>
   {#if error}

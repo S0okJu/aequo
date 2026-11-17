@@ -10,6 +10,7 @@
     shortFeedTitle,
     stripSyndicationFooter,
   } from '$lib/format';
+  import { t } from '$lib/i18n/index.svelte';
   import type { FeedFolder, FeedSummary, Item } from '$lib/types';
 
   interface Props {
@@ -56,26 +57,28 @@
   const selectedFeed = $derived(feeds.find((feed) => feed.id === selectedFeedId));
   const selectedFolder = $derived(folders.find((folder) => folder.id === selectedFolderId));
   const viewLabel = $derived(
-    selectedStarred
-      ? 'STARRED'
-      : selectedToday
-        ? 'TODAY'
-        : selectedFeed
-          ? 'FEED'
-          : selectedFolder
-            ? 'FOLDER'
-            : 'ALL',
+    t(
+      selectedStarred
+        ? 'posts.label.starred'
+        : selectedToday
+          ? 'posts.label.today'
+          : selectedFeed
+            ? 'posts.label.feed'
+            : selectedFolder
+              ? 'posts.label.folder'
+              : 'posts.label.all',
+    ),
   );
   const viewTitle = $derived(
     selectedStarred
-      ? 'Starred'
+      ? t('posts.title.starred')
       : selectedToday
-        ? 'Today'
+        ? t('posts.title.today')
         : selectedFeed
-          ? (selectedFeed.title ?? selectedFeed.url)
+          ? shortFeedTitle(selectedFeed.title, selectedFeed.url)
           : selectedFolder
             ? selectedFolder.name
-            : 'All posts',
+            : t('posts.title.all'),
   );
   const unreadInView = $derived(unreadCount ?? items.filter((item) => !item.isRead).length);
 
@@ -104,14 +107,16 @@
     <div class="feed-context">
       <span class="feed-context-label">{viewLabel}</span>
       <strong>{viewTitle}</strong>
-      {#if unreadInView > 0}<span class="unread-count">{unreadInView} unread</span>{/if}
+      {#if unreadInView > 0}<span class="unread-count"
+          >{t('posts.unreadCount', { count: unreadInView })}</span
+        >{/if}
       {#if onUnreadOnlyChange && !selectedStarred}
-        <div class="segmented" role="group" aria-label="Show posts">
+        <div class="segmented" role="group" aria-label={t('posts.filter.label')}>
           <button type="button" aria-pressed={!unreadOnly} onclick={() => onUnreadOnlyChange(false)}
-            >All</button
+            >{t('posts.filter.all')}</button
           >
           <button type="button" aria-pressed={unreadOnly} onclick={() => onUnreadOnlyChange(true)}
-            >Unread</button
+            >{t('posts.filter.unread')}</button
           >
         </div>
       {/if}
@@ -119,8 +124,8 @@
         <button
           type="button"
           class="toolbar-button"
-          aria-label="Mark all as read"
-          title="Mark all as read"
+          aria-label={t('posts.markAllRead')}
+          title={t('posts.markAllRead')}
           disabled={unreadInView === 0}
           onclick={onMarkAllRead}><Icon name="check-all" size={15} /></button
         >
@@ -136,14 +141,14 @@
           ><Icon name={selectedStarred ? 'star-outline' : 'empty'} size={20} /></span
         >
         {#if selectedStarred}
-          <h1>No starred posts</h1>
-          <p>Star a post to come back to it later - it'll show up here.</p>
+          <h1>{t('posts.empty.starredTitle')}</h1>
+          <p>{t('posts.empty.starredBody')}</p>
         {:else if unreadOnly}
-          <h1>All caught up</h1>
-          <p>There's nothing unread here. Switch to All to see read posts.</p>
+          <h1>{t('posts.empty.caughtUpTitle')}</h1>
+          <p>{t('posts.empty.caughtUpBody')}</p>
         {:else}
-          <h1>No posts yet</h1>
-          <p>New posts from your subscriptions will show up here.</p>
+          <h1>{t('posts.empty.noneTitle')}</h1>
+          <p>{t('posts.empty.noneBody')}</p>
         {/if}
       </div>
     {:else}
@@ -154,7 +159,7 @@
           <h2 class="date-heading">{formatDayHeading(item.publishedAt, nowSecs)}</h2>
         {/if}
         {@const feed = feedFor(item.feedId)}
-        {@const feedName = shortFeedTitle(feed?.title, feed?.url ?? 'Unknown feed')}
+        {@const feedName = shortFeedTitle(feed?.title, feed?.url ?? t('common.unknownFeed'))}
         <div
           class="post"
           class:selected={selectedItemId === item.id}
@@ -184,13 +189,13 @@
             >
               {formatRelative(item.publishedAt, nowSecs)}
             </time>
-            {#if !item.isRead}<span class="visually-hidden">Unread</span>{/if}
+            {#if !item.isRead}<span class="visually-hidden">{t('posts.unreadMarker')}</span>{/if}
             <button
               class="save-button"
               class:saved={item.isSaved}
               type="button"
-              aria-label={item.isSaved ? 'Unsave post' : 'Save post'}
-              title={item.isSaved ? 'Saved' : 'Save'}
+              aria-label={item.isSaved ? t('common.unsavePost') : t('common.savePost')}
+              title={item.isSaved ? t('common.saved') : t('common.save')}
               onclick={(event) => {
                 event.stopPropagation();
                 onToggleSaved(item.id);
@@ -251,6 +256,7 @@
     font-size: var(--text-caption);
     font-weight: var(--weight-bold);
     letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
   .feed-context strong {
     min-width: 5em;

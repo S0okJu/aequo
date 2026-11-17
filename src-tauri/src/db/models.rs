@@ -44,6 +44,7 @@ pub struct Feed {
     pub created_at: i64,
     pub folder_id: Option<i64>,
     pub hidden_from_all: bool,
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

@@ -20,6 +20,7 @@ const feeds: FeedSummary[] = [
     unreadCount: 2,
     folderId: null,
     hiddenFromAll: false,
+    language: null,
   },
   {
     id: 2,
@@ -36,6 +37,7 @@ const feeds: FeedSummary[] = [
     unreadCount: 0,
     folderId: null,
     hiddenFromAll: false,
+    language: null,
   },
 ];
 

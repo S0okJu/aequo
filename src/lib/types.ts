@@ -16,6 +16,8 @@ export interface FeedSummary {
   unreadCount: number;
   folderId: number | null;
   hiddenFromAll: boolean;
+  /** Declared language tag from the feed (e.g. "ko", "en-us"), if any. */
+  language: string | null;
 }
 
 export interface FeedFolder {

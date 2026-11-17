@@ -31,6 +31,7 @@ function sampleFeed(overrides: Partial<FeedSummary> = {}): FeedSummary {
     unreadCount: 0,
     folderId: null,
     hiddenFromAll: false,
+    language: null,
     ...overrides,
   };
 }

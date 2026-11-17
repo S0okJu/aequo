@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/index.svelte';
   interface Props {
     size?: number;
   }
@@ -8,7 +9,7 @@
 
 <span
   role="status"
-  aria-label="Loading"
+  aria-label={t('common.loading')}
   class="spinner"
   style:width="{size}px"
   style:height="{size}px"

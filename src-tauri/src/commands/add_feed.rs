@@ -52,11 +52,13 @@ pub fn store_feed(
     url: &str,
     title: Option<&str>,
     format: &str,
+    language: Option<&str>,
     items: &[NewItem],
 ) -> Result<i64, String> {
     let now = now_unix();
     let feed_id =
         db::insert_feed(conn, url, title, Some(format), now).map_err(|e| e.to_string())?;
+    db::set_feed_language(conn, feed_id, language).map_err(|e| e.to_string())?;
     db::upsert_items(conn, feed_id, items).map_err(|e| e.to_string())?;
     Ok(feed_id)
 }
@@ -77,8 +79,16 @@ pub async fn add_feed(db_state: State<'_, Mutex<Connection>>, url: String) -> Re
             // no DB read needed to know nothing already has content.
             fetch::enrichment::enrich_missing_full_content(&mut items, &HashSet::new()).await;
 
+            let language = fetch::parser::feed_language(&parsed);
             let conn = lock_conn(&db_state)?;
-            store_feed(&conn, &url, title.as_deref(), format, &items)
+            store_feed(
+                &conn,
+                &url,
+                title.as_deref(),
+                format,
+                language.as_deref(),
+                &items,
+            )
         }
         Err(feed_error) => {
             let now = now_unix();
@@ -94,8 +104,16 @@ pub async fn add_feed(db_state: State<'_, Mutex<Connection>>, url: String) -> Re
                 let mut items = fetch::parser::to_new_items(&parsed, &discovered.bytes, now);
                 fetch::enrichment::enrich_missing_full_content(&mut items, &HashSet::new()).await;
 
+                let language = fetch::parser::feed_language(&parsed);
                 let conn = lock_conn(&db_state)?;
-                return store_feed(&conn, &discovered.url, title.as_deref(), format, &items);
+                return store_feed(
+                    &conn,
+                    &discovered.url,
+                    title.as_deref(),
+                    format,
+                    language.as_deref(),
+                    &items,
+                );
             }
             let mut listing = fetch::webpage::parse(&url, &bytes, now).map_err(|page_error| {
                 format!("Not a supported feed ({feed_error}) or article page ({page_error})")
@@ -109,6 +127,7 @@ pub async fn add_feed(db_state: State<'_, Mutex<Connection>>, url: String) -> Re
                 &url,
                 listing.title.as_deref(),
                 "website",
+                None,
                 &listing.items,
             )
         }
@@ -152,7 +171,7 @@ mod manual_network_tests {
             let format = fetch::parser::format_label(&parsed);
             let title = feed_title(&parsed);
             let items = fetch::parser::to_new_items(&parsed, &bytes, now_unix());
-            let feed_id = store_feed(&conn, url, title.as_deref(), format, &items)
+            let feed_id = store_feed(&conn, url, title.as_deref(), format, None, &items)
                 .unwrap_or_else(|e| panic!("store failed for {url}: {e}"));
             let item_count = crate::db::count_unread(&conn, feed_id).unwrap();
 
@@ -208,6 +227,7 @@ mod enrichment_wiring_tests {
             "https://example.com/feed.xml",
             title.as_deref(),
             format,
+            None,
             &items,
         )
         .unwrap();

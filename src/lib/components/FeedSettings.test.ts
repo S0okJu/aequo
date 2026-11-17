@@ -62,6 +62,7 @@ function sampleFeed(overrides: Partial<FeedSummary> = {}): FeedSummary {
     unreadCount: 3,
     folderId: null,
     hiddenFromAll: false,
+    language: null,
     ...overrides,
   };
 }
@@ -155,8 +156,13 @@ describe('FeedSettings', () => {
   it('saves a feed-specific refresh interval', async () => {
     setFeedRefreshInterval.mockResolvedValue(undefined);
     const onChanged = vi.fn();
-    render(FeedSettings, { props: { feeds: [sampleFeed()], folders: [], onAdded: vi.fn(), onChanged, onBack: vi.fn() } });
-    await fireEvent.change(screen.getByRole('combobox', { name: 'Refresh interval for Example Feed' }), { target: { value: '3600' } });
+    render(FeedSettings, {
+      props: { feeds: [sampleFeed()], folders: [], onAdded: vi.fn(), onChanged, onBack: vi.fn() },
+    });
+    await fireEvent.change(
+      screen.getByRole('combobox', { name: 'Refresh interval for Example Feed' }),
+      { target: { value: '3600' } },
+    );
     await waitFor(() => expect(setFeedRefreshInterval).toHaveBeenCalledWith(1, 3600));
     expect(onChanged).toHaveBeenCalled();
   });
