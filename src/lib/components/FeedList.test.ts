@@ -47,7 +47,6 @@ describe('FeedList', () => {
     selectedFolderId: null,
     onSelectFeed: vi.fn(),
     onSelectFolder: vi.fn(),
-    onManageFolders: vi.fn(),
     onMoveFeed: vi.fn(),
   };
 
@@ -83,7 +82,6 @@ describe('FeedList', () => {
         selectedFolderId: null,
         onSelectFeed: vi.fn(),
         onSelectFolder: vi.fn(),
-        onManageFolders: vi.fn(),
         onMoveFeed: vi.fn(),
       },
     });
@@ -103,13 +101,53 @@ describe('FeedList', () => {
         selectedFolderId: null,
         onSelectFeed,
         onSelectFolder: vi.fn(),
-        onManageFolders: vi.fn(),
         onMoveFeed: vi.fn(),
       },
     });
 
     await fireEvent.click(screen.getByRole('button', { name: 'Two' }));
     expect(onSelectFeed).toHaveBeenCalledWith(2);
-    expect(screen.getByRole('button', { name: /One/ }).classList.contains('selected')).toBe(true);
+    expect(screen.getByRole('button', { name: /^One/ }).classList.contains('selected')).toBe(true);
+  });
+
+  it('offers the same actions from the row menu and from right-click', async () => {
+    const onMarkRead = vi.fn();
+    const onOpenSettings = vi.fn();
+    render(FeedList, {
+      props: {
+        ...baseProps,
+        feeds,
+        selectedFeedId: null,
+        onMarkRead,
+        onOpenSettings,
+      },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for One' }));
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Mark as read' }));
+    expect(onMarkRead).toHaveBeenCalledWith({ feedId: 1 });
+    expect(screen.queryByRole('menu')).toBeNull();
+
+    await fireEvent.contextMenu(screen.getByRole('button', { name: /^One/ }));
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Feed settings…' }));
+    expect(onOpenSettings).toHaveBeenCalledWith({ feedId: 1 });
+  });
+
+  it('remembers collapsed folders across mounts', async () => {
+    localStorage.removeItem('aequo:collapsedFolders');
+    const props = {
+      ...baseProps,
+      feeds: [{ ...feeds[0], folderId: 9 }],
+      folders: [{ id: 9, name: 'Tech', sortOrder: 0, createdAt: 0 }],
+      selectedFeedId: null,
+    };
+    const first = render(FeedList, { props });
+    await fireEvent.click(screen.getByRole('button', { name: 'Collapse Tech' }));
+    expect(screen.queryByRole('button', { name: /^One/ })).toBeNull();
+    first.unmount();
+
+    render(FeedList, { props });
+    expect(screen.getByRole('button', { name: 'Expand Tech' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^One/ })).toBeNull();
   });
 });

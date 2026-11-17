@@ -18,10 +18,11 @@
     markItemsRead,
     markItemsUnread,
     markRead,
+    refreshFeed,
     setItemSaved,
     updateFeedOrganization,
   } from '$lib/api';
-  import type { FeedFolder, FeedSummary, Item, ItemFilter } from '$lib/types';
+  import type { FeedFolder, FeedSummary, Item, ItemFilter, SidebarScope } from '$lib/types';
 
   const PAGE_SIZE = 50;
   const REFRESH_DEBOUNCE_MS = 200;
@@ -281,10 +282,20 @@
     return inView.reduce((sum, feed) => sum + feed.unreadCount, 0);
   });
 
-  async function markAllRead() {
+  // "Mark all read" for the open view (only what was loaded by then) or for
+  // a feed/folder from the sidebar menu (everything fetched so far).
+  function markAllRead() {
+    return markFilterRead({ ...currentFilter(), unreadOnly: false }, viewLoadedAt);
+  }
+
+  function markScopeRead(scope: SidebarScope) {
+    return markFilterRead(scope, Math.floor(Date.now() / 1000));
+  }
+
+  async function markFilterRead(filter: ItemFilter, fetchedBefore: number) {
     let ids: number[];
     try {
-      ids = await markItemsRead({ ...currentFilter(), unreadOnly: false }, viewLoadedAt);
+      ids = await markItemsRead(filter, fetchedBefore);
     } catch (error) {
       showToast(t('toast.markAllReadFailed'), { type: 'error' });
       console.error('mark_items_read failed:', error);
@@ -394,6 +405,30 @@
   function selectPost(itemId: number) {
     selectedItemId = selectedItemId === itemId ? null : itemId;
     markPostRead(itemId);
+  }
+
+  // Feed and folder settings live on the settings page; the sidebar links
+  // straight to the relevant tab.
+  function openSettings(scope?: SidebarScope) {
+    const tab = scope && 'folderId' in scope ? 'folders' : 'feeds';
+    goto(resolve(`/settings?tab=${tab}`));
+  }
+
+  function addFeedFromSidebar() {
+    goto(resolve('/settings?tab=feeds'));
+  }
+
+  // Refresh results arrive through the usual `feed-updated` event.
+  async function refreshOneFeed(feedId: number) {
+    try {
+      await refreshFeed(feedId);
+    } catch (error) {
+      const feed = feeds.find((entry) => entry.id === feedId);
+      showToast(t('toast.refreshFailed', { name: feed?.title ?? feed?.url ?? '' }), {
+        type: 'error',
+      });
+      console.error('refresh_feed failed:', error);
+    }
   }
 
   async function toggleSaved(itemId: number) {
@@ -568,14 +603,27 @@
         onSelectFolder={selectFolder}
         onSelectToday={selectToday}
         onSelectStarred={selectStarred}
-        onManageFolders={() => goto(resolve('/settings?tab=folders'))}
         onMoveFeed={moveFeed}
+        onMarkRead={markScopeRead}
+        onRefreshFeed={refreshOneFeed}
+        onOpenSettings={openSettings}
       />
     </div>
-    <button class="settings-button" onclick={() => goto(resolve('/settings'))}>
-      <Icon name="settings" size={14} />
-      {t('page.manageFeeds')}
-    </button>
+    <div class="sidebar-footer">
+      <button class="footer-button" type="button" onclick={addFeedFromSidebar}>
+        <Icon name="plus" size={15} />
+        {t('sidebar.addFeed')}
+      </button>
+      <button
+        class="footer-button icon-only"
+        type="button"
+        aria-label={t('sidebar.settings')}
+        title={t('sidebar.settings')}
+        onclick={() => openSettings()}
+      >
+        <Icon name="settings" size={15} />
+      </button>
+    </div>
   </aside>
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <div
@@ -727,15 +775,23 @@
     overflow-y: auto;
   }
 
-  .settings-button {
+  .sidebar-footer {
     display: flex;
     align-items: center;
-    gap: 8px;
-    width: calc(100% - 16px);
-    margin: 8px;
-    padding: 8px 10px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-md);
+    gap: var(--space-1);
+    padding: var(--space-2);
+    border-top: 1px solid var(--color-border);
+  }
+
+  .footer-button {
+    display: flex;
+    min-height: 32px;
+    flex: 1;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 6px var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-text-secondary);
     font: inherit;
@@ -744,9 +800,14 @@
     cursor: pointer;
   }
 
-  .settings-button:hover {
-    border-color: var(--color-border);
-    background: var(--color-bg);
+  .footer-button.icon-only {
+    flex: 0 0 32px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .footer-button:hover {
+    background: var(--color-hover-bg);
     color: var(--color-text);
   }
 

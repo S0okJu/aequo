@@ -3,7 +3,9 @@
   import Icon from '$lib/icons/Icon.svelte';
   import Spinner from './Spinner.svelte';
   import { showToast } from '$lib/toast.svelte.ts';
-  import type { FeedFolder, FeedSummary } from '$lib/types';
+  import { shortFeedTitle } from '$lib/format';
+  import { t } from '$lib/i18n/index.svelte';
+  import type { FeedFolder, FeedSummary, SidebarScope } from '$lib/types';
 
   interface Props {
     feeds: FeedSummary[];
@@ -19,8 +21,10 @@
     onSelectFolder: (folderId: number | null) => void;
     onSelectToday?: () => void;
     onSelectStarred?: () => void;
-    onManageFolders: () => void;
     onMoveFeed: (feedId: number, folderId: number | null) => Promise<void>;
+    onMarkRead?: (scope: SidebarScope) => void;
+    onRefreshFeed?: (feedId: number) => void;
+    onOpenSettings?: (scope?: SidebarScope) => void;
   }
 
   let {
@@ -36,18 +40,20 @@
     onSelectFolder,
     onSelectToday = () => {},
     onSelectStarred = () => {},
-    onManageFolders,
     onMoveFeed,
+    onMarkRead,
+    onRefreshFeed,
+    onOpenSettings,
   }: Props = $props();
+
+  const COLLAPSED_KEY = 'aequo:collapsedFolders';
 
   const visibleFeeds = $derived(feeds.filter((feed) => !feed.hiddenFromAll));
   const totalUnread = $derived(visibleFeeds.reduce((sum, feed) => sum + feed.unreadCount, 0));
   const unfiledFeeds = $derived(feeds.filter((feed) => feed.folderId === null));
 
   // Memoized once per `feeds` change instead of re-filtering/re-reducing the
-  // full feed list once per folder on every render. Plain objects (not Map)
-  // since folder ids are always numbers and these are immutable snapshots,
-  // not reactive state that needs SvelteMap's own tracking.
+  // full feed list once per folder on every render.
   const feedsByFolder = $derived.by(() => {
     const byFolder: Record<number, FeedSummary[]> = {};
     for (const feed of feeds) {
@@ -84,25 +90,41 @@
     unreadOnly && shownFolders.length === 0 && shownUnfiledFeeds.length === 0,
   );
 
-  let collapsedFolders = new SvelteSet<number>();
-  let dragOverTarget = $state<number | 'unfiled' | null>(null);
-  let draggingFeedId = $state<number | null>(null);
-  let openMoveMenuFeedId = $state<number | null>(null);
-  let moveMenuDropUp = $state(false);
+  function feedName(feed: FeedSummary): string {
+    return shortFeedTitle(feed.title, feed.url);
+  }
+
+  // Collapsed folders survive restarts; ids of deleted folders are simply
+  // never rendered, so stale entries are harmless.
+  function readCollapsed(): number[] {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]');
+      return Array.isArray(parsed) ? parsed.filter((id) => Number.isInteger(id)) : [];
+    } catch {
+      return [];
+    }
+  }
+  const collapsedFolders = new SvelteSet<number>(readCollapsed());
 
   function toggleCollapsed(folderId: number) {
     if (collapsedFolders.has(folderId)) collapsedFolders.delete(folderId);
     else collapsedFolders.add(folderId);
+    try {
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedFolders]));
+    } catch {
+      // Still collapsed for this session.
+    }
   }
+
+  // --- Drag and drop between folders -------------------------------------
+
+  let dragOverTarget = $state<number | 'unfiled' | null>(null);
+  let draggingFeedId = $state<number | null>(null);
 
   function handleDragStart(event: DragEvent, feedId: number) {
     event.dataTransfer?.setData('text/plain', String(feedId));
     if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
     draggingFeedId = feedId;
-  }
-
-  function handleDragEnd() {
-    draggingFeedId = null;
   }
 
   function handleDragOver(event: DragEvent, target: number | 'unfiled') {
@@ -118,7 +140,7 @@
     try {
       await onMoveFeed(feedId, folderId);
     } catch (error) {
-      showToast(`Couldn't move feed: ${String(error)}`, { type: 'error' });
+      showToast(t('sidebar.moveFailed', { error: String(error) }), { type: 'error' });
     }
   }
 
@@ -130,28 +152,74 @@
     if (!Number.isNaN(feedId)) moveFeedTo(feedId, folderId);
   }
 
-  function toggleMoveMenu(feedId: number, event: MouseEvent) {
-    if (openMoveMenuFeedId === feedId) {
-      closeMoveMenu();
+  // --- Row menu: the same actions from `⋯` and from right-click ----------
+
+  type MenuTarget = { kind: 'feed'; feed: FeedSummary } | { kind: 'folder'; folder: FeedFolder };
+  let menu = $state<(MenuTarget & { x: number; y: number; returnFocus: HTMLElement }) | null>(null);
+
+  const MENU_WIDTH = 210;
+  const MENU_MAX_HEIGHT = 320;
+
+  function openMenu(target: MenuTarget, x: number, y: number, returnFocus: HTMLElement) {
+    // Keep the fixed-position menu inside the window.
+    menu = {
+      ...target,
+      x: Math.min(x, window.innerWidth - MENU_WIDTH - 8),
+      y: Math.min(y, window.innerHeight - MENU_MAX_HEIGHT - 8),
+      returnFocus,
+    };
+  }
+
+  function openMenuFromButton(target: MenuTarget, event: MouseEvent) {
+    const trigger = event.currentTarget as HTMLElement;
+    if (menu && menu.returnFocus === trigger) {
+      closeMenu();
       return;
     }
-    openMoveMenuFeedId = feedId;
-    const trigger = event.currentTarget as HTMLElement;
     const rect = trigger.getBoundingClientRect();
-    moveMenuDropUp = window.innerHeight - rect.bottom < 160;
+    openMenu(target, rect.left, rect.bottom + 4, trigger);
   }
 
-  function closeMoveMenu() {
-    openMoveMenuFeedId = null;
+  function openContextMenu(target: MenuTarget, event: MouseEvent) {
+    event.preventDefault();
+    openMenu(target, event.clientX, event.clientY, event.currentTarget as HTMLElement);
   }
 
-  function selectMoveTarget(feed: FeedSummary, folderId: number | null) {
-    closeMoveMenu();
-    moveFeedTo(feed.id, folderId);
+  function closeMenu(restoreFocus = false) {
+    const focusTarget = menu?.returnFocus;
+    menu = null;
+    if (restoreFocus) focusTarget?.focus();
   }
 
-  function focusFirstMenuItem(node: HTMLElement) {
-    node.querySelector<HTMLElement>('.move-menu-item')?.focus();
+  // Run before closing: the action reads the menu's target, which closing clears.
+  function runMenuAction(action: () => void) {
+    action();
+    closeMenu();
+  }
+
+  function focusFirstItem(node: HTMLElement) {
+    node.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
+  }
+
+  function handleMenuKeydown(event: KeyboardEvent) {
+    const items = [
+      ...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(
+        '[role="menuitem"]:not(:disabled)',
+      ),
+    ];
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeMenu(true);
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      items[(index + 1) % items.length]?.focus();
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      items[(index - 1 + items.length) % items.length]?.focus();
+    } else if (event.key === 'Tab') {
+      closeMenu();
+    }
   }
 
   function clickOutside(node: HTMLElement, onOutside: () => void) {
@@ -171,34 +239,83 @@
   }
 
   function feedErrorTooltip(feed: FeedSummary): string {
-    if (feed.lastError) return `Last refresh failed: ${feed.lastError}`;
-    return `${feed.consecutiveFailures} consecutive failed refresh${feed.consecutiveFailures === 1 ? '' : 'es'}`;
+    if (feed.lastError) return t('sidebar.feedError', { error: feed.lastError });
+    return t('sidebar.feedFailures', { count: feed.consecutiveFailures });
   }
+
+  const allSelected = $derived(
+    selectedFeedId === null && selectedFolderId === null && !selectedToday && !selectedStarred,
+  );
 </script>
 
-<nav class="feed-list" aria-label="Feed navigation">
+{#snippet feedRow(feed: FeedSummary, nested: boolean)}
+  <div class="item-row" class:nested>
+    <button
+      class="row"
+      class:selected={selectedFeedId === feed.id}
+      class:quiet={feed.unreadCount === 0}
+      class:dragging={draggingFeedId === feed.id}
+      aria-current={selectedFeedId === feed.id ? 'true' : undefined}
+      title={feedHasError(feed)
+        ? `${feed.title ?? feed.url}\n${feedErrorTooltip(feed)}`
+        : (feed.title ?? feed.url)}
+      draggable="true"
+      ondragstart={(event) => handleDragStart(event, feed.id)}
+      ondragend={() => (draggingFeedId = null)}
+      onclick={() => onSelectFeed(feed.id)}
+      oncontextmenu={(event) => openContextMenu({ kind: 'feed', feed }, event)}
+    >
+      <span class="title">{feedName(feed)}</span>
+      {#if feedHasError(feed)}
+        <span class="feed-health" role="img" aria-label={feedErrorTooltip(feed)}
+          ><Icon name="error" size={12} /></span
+        >
+      {/if}
+      {#if feed.unreadCount > 0}<span class="count">{feed.unreadCount}</span>{/if}
+    </button>
+    <button
+      type="button"
+      class="row-icon-button more"
+      aria-label={t('sidebar.actionsFor', { name: feedName(feed) })}
+      aria-haspopup="menu"
+      aria-expanded={menu?.kind === 'feed' && menu.feed.id === feed.id}
+      onclick={(event) => openMenuFromButton({ kind: 'feed', feed }, event)}
+      ><Icon name="more" size={14} /></button
+    >
+  </div>
+{/snippet}
+
+<nav class="feed-list" aria-label={t('sidebar.nav')}>
+  <h2 class="visually-hidden">{t('sidebar.heading')}</h2>
   <button
-    class="row"
-    class:selected={selectedFeedId === null && selectedFolderId === null && !selectedToday && !selectedStarred}
+    class="row fixed"
+    class:selected={allSelected}
+    aria-current={allSelected ? 'true' : undefined}
     onclick={() => onSelectFeed(null)}
   >
-    <span class="title">All</span>
+    <span class="row-icon"><Icon name="inbox" size={15} /></span>
+    <span class="title">{t('sidebar.all')}</span>
     {#if totalUnread > 0}<span class="count">{totalUnread}</span>{/if}
   </button>
   <button
-    class="row"
-    class:selected={selectedFeedId === null && selectedFolderId === null && selectedToday}
+    class="row fixed"
+    class:selected={selectedToday}
+    aria-current={selectedToday ? 'true' : undefined}
     onclick={onSelectToday}
   >
-    <span class="row-icon"><Icon name="clock" size={14} /></span><span class="title">Today</span>
+    <span class="row-icon"><Icon name="clock" size={15} /></span>
+    <span class="title">{t('sidebar.today')}</span>
   </button>
   <button
-    class="row"
-    class:selected={selectedFeedId === null && selectedFolderId === null && selectedStarred}
+    class="row fixed"
+    class:selected={selectedStarred}
+    aria-current={selectedStarred ? 'true' : undefined}
     onclick={onSelectStarred}
   >
-    <span class="row-icon"><Icon name="star" size={14} /></span><span class="title">Starred</span>
+    <span class="row-icon"><Icon name="star-outline" size={15} /></span>
+    <span class="title">{t('sidebar.starred')}</span>
   </button>
+
   {#if loading && feeds.length === 0 && folders.length === 0}
     <div class="empty-placeholder">
       <Spinner size={20} />
@@ -206,219 +323,197 @@
   {:else if feeds.length === 0 && folders.length === 0}
     <div class="empty-placeholder">
       <span class="empty-placeholder-icon"><Icon name="empty" size={20} /></span>
-      <h3>No feeds yet</h3>
-      <p>Use "Manage feeds" below to add your first subscription.</p>
+      <h3>{t('sidebar.noFeedsTitle')}</h3>
+      <p>{t('sidebar.noFeedsBody')}</p>
     </div>
+  {:else if allCaughtUp}
+    <p class="caught-up">{t('sidebar.caughtUp')}</p>
   {:else}
-    <div class="section-label">
-      <span>FOLDERS</span>
-      <button
-        type="button"
-        aria-label="Manage folders"
-        title="Manage folders"
-        onclick={onManageFolders}>Manage →</button
-      >
-    </div>
-
-    {#each shownFolders as folder (folder.id)}
-      {@const folderFeeds = feedsByFolder[folder.id] ?? []}
-      {@const folderUnread = unreadByFolder[folder.id] ?? 0}
-      {@const isCollapsed = collapsedFolders.has(folder.id)}
-      <div class="folder-group">
+    <div class="groups">
+      {#each shownFolders as folder (folder.id)}
+        {@const folderFeeds = feedsByFolder[folder.id] ?? []}
+        {@const folderUnread = unreadByFolder[folder.id] ?? 0}
+        {@const isCollapsed = collapsedFolders.has(folder.id)}
         <div
-          class="folder-row"
+          class="folder-group"
           role="group"
-          aria-label={`${folder.name} folder`}
-          class:selected={selectedFolderId === folder.id}
-          class:drag-over={dragOverTarget === folder.id}
-          ondragover={(event) => handleDragOver(event, folder.id)}
-          ondragleave={() => handleDragLeave(folder.id)}
-          ondrop={(event) => handleDrop(event, folder.id)}
+          aria-label={t('sidebar.folderGroup', { name: folder.name })}
         >
-          <button
-            class="folder-collapse"
-            type="button"
-            aria-label={isCollapsed ? `Expand ${folder.name}` : `Collapse ${folder.name}`}
-            onclick={() => toggleCollapsed(folder.id)}
+          <div
+            class="item-row folder-row"
+            class:drag-over={dragOverTarget === folder.id}
+            role="presentation"
+            ondragover={(event) => handleDragOver(event, folder.id)}
+            ondragleave={() => handleDragLeave(folder.id)}
+            ondrop={(event) => handleDrop(event, folder.id)}
           >
-            <span class="chevron" class:collapsed={isCollapsed}><Icon name="chevron-down" size={12} /></span>
-          </button>
-          <button class="folder-select" type="button" onclick={() => onSelectFolder(folder.id)}>
-            <span class="title">{folder.name}</span>
-            {#if folderUnread > 0}<span class="count">{folderUnread}</span>{/if}
-          </button>
-        </div>
-        {#if !isCollapsed}
-          <div class="folder-children">
+            <button
+              class="row-icon-button chevron"
+              class:collapsed={isCollapsed}
+              type="button"
+              aria-expanded={!isCollapsed}
+              aria-label={t(isCollapsed ? 'sidebar.expand' : 'sidebar.collapse', {
+                name: folder.name,
+              })}
+              onclick={() => toggleCollapsed(folder.id)}
+              ><Icon name="chevron-down" size={12} /></button
+            >
+            <button
+              class="row folder"
+              class:selected={selectedFolderId === folder.id}
+              class:quiet={folderUnread === 0}
+              aria-current={selectedFolderId === folder.id ? 'true' : undefined}
+              title={folder.name}
+              type="button"
+              onclick={() => onSelectFolder(folder.id)}
+              oncontextmenu={(event) => openContextMenu({ kind: 'folder', folder }, event)}
+            >
+              <span class="title">{folder.name}</span>
+              {#if folderUnread > 0}<span class="count">{folderUnread}</span>{/if}
+            </button>
+            <button
+              type="button"
+              class="row-icon-button more"
+              aria-label={t('sidebar.actionsFor', { name: folder.name })}
+              aria-haspopup="menu"
+              aria-expanded={menu?.kind === 'folder' && menu.folder.id === folder.id}
+              onclick={(event) => openMenuFromButton({ kind: 'folder', folder }, event)}
+              ><Icon name="more" size={14} /></button
+            >
+          </div>
+          {#if !isCollapsed}
             {#if folderFeeds.length === 0}
-              <p class="empty-folder-hint">Drop feeds here</p>
+              <p class="empty-folder-hint">{t('sidebar.dropHere')}</p>
             {:else}
               {#each folderFeeds.filter(showFeed) as feed (feed.id)}
-                <div class="feed-row">
-                  <button
-                    class="row nested"
-                    class:selected={selectedFeedId === feed.id}
-                    class:quiet={feed.unreadCount === 0}
-                    class:dragging={draggingFeedId === feed.id}
-                    draggable="true"
-                    ondragstart={(event) => handleDragStart(event, feed.id)}
-                    ondragend={handleDragEnd}
-                    onclick={() => onSelectFeed(feed.id)}
-                  >
-                    <span class="title">{feed.title ?? feed.url}</span>
-                    {#if feedHasError(feed)}<span
-                        class="feed-health"
-                        role="img"
-                        aria-label={feedErrorTooltip(feed)}
-                        title={feedErrorTooltip(feed)}
-                      ><Icon name="error" size={11} /></span>{/if}
-                    {#if feed.unreadCount > 0}<span class="count">{feed.unreadCount}</span>{/if}
-                  </button>
-                  <button
-                    type="button"
-                    class="feed-move-trigger"
-                    id={`move-trigger-${feed.id}`}
-                    aria-label={`Move ${feed.title ?? feed.url}`}
-                    title="Move to folder"
-                    aria-haspopup="menu"
-                    aria-expanded={openMoveMenuFeedId === feed.id}
-                    onclick={(event) => toggleMoveMenu(feed.id, event)}><Icon name="more" size={14} /></button
-                  >
-                  {#if openMoveMenuFeedId === feed.id}
-                    <div
-                      class="move-menu"
-                      class:drop-up={moveMenuDropUp}
-                      role="menu"
-                      tabindex="-1"
-                      aria-label={`Move ${feed.title ?? feed.url} to folder`}
-                      use:focusFirstMenuItem
-                      use:clickOutside={closeMoveMenu}
-                      onkeydown={(event) => {
-                        if (event.key === 'Escape') {
-                          event.preventDefault();
-                          closeMoveMenu();
-                          document.getElementById(`move-trigger-${feed.id}`)?.focus();
-                        }
-                      }}
-                    >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        class="move-menu-item"
-                        onclick={() => selectMoveTarget(feed, null)}>Unfiled</button
-                      >
-                      {#each folders.filter((f) => f.id !== feed.folderId) as target (target.id)}
-                        <button
-                          type="button"
-                          role="menuitem"
-                          class="move-menu-item"
-                          onclick={() => selectMoveTarget(feed, target.id)}>{target.name}</button
-                        >
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
+                {@render feedRow(feed, true)}
               {/each}
             {/if}
-          </div>
-        {/if}
-      </div>
-    {/each}
+          {/if}
+        </div>
+      {/each}
 
-    {#if allCaughtUp}
-      <p class="caught-up">All caught up</p>
-    {:else if shownUnfiledFeeds.length > 0 || (folders.length > 0 && !unreadOnly)}
-      <div
-        class="unfiled-group"
-        role="group"
-        aria-label="Unfiled feeds"
-        class:drag-over={dragOverTarget === 'unfiled'}
-        ondragover={(event) => handleDragOver(event, 'unfiled')}
-        ondragleave={() => handleDragLeave('unfiled')}
-        ondrop={(event) => handleDrop(event, null)}
-      >
-        <div class="section-label unfiled-label">UNFILED</div>
-        {#each shownUnfiledFeeds as feed (feed.id)}
-          <div class="feed-row">
-            <button
-              class="row"
-              class:selected={selectedFeedId === feed.id}
-              class:quiet={feed.unreadCount === 0}
-              class:dragging={draggingFeedId === feed.id}
-              draggable="true"
-              ondragstart={(event) => handleDragStart(event, feed.id)}
-              ondragend={handleDragEnd}
-              onclick={() => onSelectFeed(feed.id)}
-            >
-              <span class="title">{feed.title ?? feed.url}</span>
-              {#if feedHasError(feed)}<span
-                  class="feed-health"
-                  role="img"
-                  aria-label={feedErrorTooltip(feed)}
-                  title={feedErrorTooltip(feed)}
-                ><Icon name="error" size={11} /></span>{/if}
-              {#if feed.unreadCount > 0}<span class="count">{feed.unreadCount}</span>{/if}
-            </button>
-            {#if folders.length > 0}
-              <button
-                type="button"
-                class="feed-move-trigger"
-                id={`move-trigger-${feed.id}`}
-                aria-label={`Move ${feed.title ?? feed.url}`}
-                title="Move to folder"
-                aria-haspopup="menu"
-                aria-expanded={openMoveMenuFeedId === feed.id}
-                onclick={(event) => toggleMoveMenu(feed.id, event)}><Icon name="more" size={14} /></button
-              >
-              {#if openMoveMenuFeedId === feed.id}
-                <div
-                  class="move-menu"
-                  class:drop-up={moveMenuDropUp}
-                  role="menu"
-                  tabindex="-1"
-                  aria-label={`Move ${feed.title ?? feed.url} to folder`}
-                  use:focusFirstMenuItem
-                  use:clickOutside={closeMoveMenu}
-                  onkeydown={(event) => {
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      closeMoveMenu();
-                      document.getElementById(`move-trigger-${feed.id}`)?.focus();
-                    }
-                  }}
-                >
-                  {#each folders as target (target.id)}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      class="move-menu-item"
-                      onclick={() => selectMoveTarget(feed, target.id)}>{target.name}</button
-                    >
-                  {/each}
-                </div>
-              {/if}
-            {/if}
-          </div>
-        {/each}
-      </div>
-    {/if}
+      {#if shownUnfiledFeeds.length > 0 || (folders.length > 0 && !unreadOnly)}
+        <div
+          class="unfiled-group"
+          class:drag-over={dragOverTarget === 'unfiled'}
+          role="group"
+          aria-label={t('sidebar.unfiledGroup')}
+          ondragover={(event) => handleDragOver(event, 'unfiled')}
+          ondragleave={() => handleDragLeave('unfiled')}
+          ondrop={(event) => handleDrop(event, null)}
+        >
+          {#if folders.length > 0}
+            <p class="group-label">{t('sidebar.unfiled')}</p>
+          {/if}
+          {#each shownUnfiledFeeds as feed (feed.id)}
+            {@render feedRow(feed, false)}
+          {/each}
+        </div>
+      {/if}
+    </div>
   {/if}
 </nav>
+
+{#if menu}
+  {@const current = menu}
+  <div
+    class="menu"
+    role="menu"
+    tabindex="-1"
+    style:left="{current.x}px"
+    style:top="{current.y}px"
+    aria-label={t('sidebar.actionsFor', {
+      name: current.kind === 'feed' ? feedName(current.feed) : current.folder.name,
+    })}
+    use:focusFirstItem
+    use:clickOutside={() => closeMenu()}
+    onkeydown={handleMenuKeydown}
+  >
+    {#if current.kind === 'feed'}
+      {@const feed = current.feed}
+      {#if feedHasError(feed)}
+        <p class="menu-error">{feedErrorTooltip(feed)}</p>
+      {/if}
+      <button
+        type="button"
+        role="menuitem"
+        disabled={feed.unreadCount === 0}
+        onclick={() => runMenuAction(() => onMarkRead?.({ feedId: feed.id }))}
+        ><Icon name="check-all" size={14} />{t('sidebar.markRead')}</button
+      >
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => runMenuAction(() => onRefreshFeed?.(feed.id))}
+        ><Icon name="retry" size={14} />{t('sidebar.refresh')}</button
+      >
+      {#if folders.length > 0}
+        <div class="menu-separator" role="separator"></div>
+        <p class="menu-label">{t('sidebar.moveTo')}</p>
+        {#if feed.folderId !== null}
+          <button
+            type="button"
+            role="menuitem"
+            class="indented"
+            onclick={() => runMenuAction(() => moveFeedTo(feed.id, null))}
+            >{t('sidebar.unfiled')}</button
+          >
+        {/if}
+        {#each folders.filter((folder) => folder.id !== feed.folderId) as target (target.id)}
+          <button
+            type="button"
+            role="menuitem"
+            class="indented"
+            onclick={() => runMenuAction(() => moveFeedTo(feed.id, target.id))}
+            >{target.name}</button
+          >
+        {/each}
+      {/if}
+      <div class="menu-separator" role="separator"></div>
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => runMenuAction(() => onOpenSettings?.({ feedId: feed.id }))}
+        ><Icon name="settings" size={14} />{t('sidebar.feedSettings')}</button
+      >
+    {:else}
+      {@const folder = current.folder}
+      <button
+        type="button"
+        role="menuitem"
+        disabled={(unreadByFolder[folder.id] ?? 0) === 0}
+        onclick={() => runMenuAction(() => onMarkRead?.({ folderId: folder.id }))}
+        ><Icon name="check-all" size={14} />{t('sidebar.markRead')}</button
+      >
+      <div class="menu-separator" role="separator"></div>
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => runMenuAction(() => onOpenSettings?.({ folderId: folder.id }))}
+        ><Icon name="settings" size={14} />{t('sidebar.folderSettings')}</button
+      >
+    {/if}
+  </div>
+{/if}
 
 <style>
   .feed-list {
     min-height: 100%;
-    padding: 8px 4px 14px;
+    padding: var(--space-2) var(--space-2) var(--space-4);
   }
-  .row,
-  .folder-select {
+
+  /* One row grammar for fixed views, folders and feeds: 32px tall, a 16px
+     icon column, name, right-aligned count. */
+  .row {
     display: flex;
     min-width: 0;
+    flex: 1;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     width: 100%;
-    min-height: 30px;
-    padding: 7px 8px;
+    min-height: 32px;
+    padding: 6px var(--space-2);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -428,90 +523,170 @@
     text-align: left;
     cursor: pointer;
   }
-  .row:hover,
-  .folder-select:hover {
+  .row:hover {
     background: var(--color-hover-bg);
   }
+  .row.selected {
+    background: var(--color-selection-bg);
+  }
+  .row.selected .title {
+    font-weight: var(--weight-medium);
+  }
   .row[draggable='true'] {
-    cursor: grab;
     -webkit-user-drag: element;
     user-select: none;
     -webkit-user-select: none;
   }
-  .row[draggable='true']:active {
-    cursor: grabbing;
-  }
   .row.dragging {
     opacity: 0.5;
   }
-  .feed-row {
+  .row.folder .title {
+    font-weight: var(--weight-medium);
+  }
+  /* Nothing unread: stays listed (so the sidebar doesn't reshuffle) but
+     recedes, letting feeds with something to read stand out. */
+  .row.quiet:not(.selected) .title {
+    color: var(--color-text-secondary);
+  }
+
+  .row-icon {
+    display: inline-flex;
+    width: 16px;
+    flex-shrink: 0;
+    justify-content: center;
+    color: var(--color-text-secondary);
+  }
+
+  .title {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .count {
+    flex-shrink: 0;
+    color: var(--color-text-tertiary);
+    font-size: var(--text-small);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .item-row {
     position: relative;
     display: flex;
     align-items: center;
-    gap: 2px;
   }
-  .feed-row .row {
-    flex: 1;
-    min-width: 0;
+  .item-row.nested {
+    padding-left: var(--space-5);
   }
-  .empty-folder-hint {
-    margin: 2px 5px 6px 0;
-    color: var(--color-text-tertiary);
-    font-size: var(--text-small);
-    font-style: italic;
-    line-height: 1.4;
-  }
-  .feed-move-trigger {
+
+  .row-icon-button {
     display: grid;
-    width: 22px;
-    height: 22px;
-    flex: 0 0 22px;
+    width: 24px;
+    height: 28px;
+    flex: 0 0 24px;
     place-items: center;
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-text-tertiary);
-    font: inherit;
     cursor: pointer;
+  }
+  .row-icon-button:hover {
+    background: var(--color-hover-bg);
+    color: var(--color-text);
+  }
+
+  /* `⋯` keeps its width (no row shift) and only shows on hover, keyboard
+     focus within the row, or while its menu is open; without a hover-capable
+     pointer it stays visible. */
+  .more {
     opacity: 0;
   }
-  .feed-move-trigger {
-    opacity: 0.55;
-  }
-  .feed-row:hover .feed-move-trigger,
-  .feed-move-trigger:focus-visible,
-  .feed-move-trigger[aria-expanded='true'] {
+  .item-row:hover .more,
+  .item-row:focus-within .more,
+  .more[aria-expanded='true'] {
     opacity: 1;
   }
-  .feed-move-trigger:hover {
-    background: var(--color-hover-bg);
+  @media (hover: none) {
+    .more {
+      opacity: 1;
+    }
   }
-  .move-menu {
-    position: absolute;
-    top: 100%;
-    right: 0;
-    z-index: 20;
+
+  .feed-health {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: var(--color-error);
+  }
+
+  .chevron :global(svg) {
+    transition: transform var(--transition);
+  }
+  .chevron.collapsed :global(svg) {
+    transform: rotate(-90deg);
+  }
+
+  .groups {
     display: flex;
     flex-direction: column;
-    gap: 1px;
-    max-width: 140px;
-    margin-top: 2px;
-    padding: 4px;
-    border: 1px solid var(--color-border);
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+  }
+
+  .folder-row .chevron {
+    flex-basis: 16px;
+    width: 16px;
+  }
+
+  .group-label {
+    margin: var(--space-2) var(--space-2) 2px;
+    color: var(--color-text-tertiary);
+    font-size: var(--text-caption);
+    font-weight: var(--weight-medium);
+  }
+
+  .empty-folder-hint {
+    margin: 2px 0 6px var(--space-5);
+    padding-left: var(--space-2);
+    color: var(--color-text-tertiary);
+    font-size: var(--text-small);
+  }
+
+  .caught-up {
+    margin: var(--space-4) var(--space-3);
+    color: var(--color-text-tertiary);
+    font-size: var(--text-small);
+  }
+
+  .folder-row.drag-over,
+  .unfiled-group.drag-over {
     border-radius: var(--radius-sm);
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+    background: var(--color-selection-bg);
+  }
+
+  .menu {
+    position: fixed;
+    z-index: 60;
+    display: flex;
+    width: 210px;
+    max-height: 320px;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: var(--space-1);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
     background: var(--color-bg);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+    box-shadow: var(--shadow-popover);
   }
-  .move-menu.drop-up {
-    top: auto;
-    bottom: 100%;
-    margin-top: 0;
-    margin-bottom: 2px;
-  }
-  .move-menu-item {
-    display: block;
-    width: 100%;
-    padding: 6px 8px;
+  .menu button {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 6px var(--space-2);
     border: 0;
     border-radius: var(--radius-xs);
     background: transparent;
@@ -520,148 +695,47 @@
     font-size: var(--text-body);
     text-align: left;
     cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
-  .move-menu-item:hover,
-  .move-menu-item:focus-visible {
-    background: var(--color-hover-bg);
-  }
-  .row.selected,
-  .folder-row.selected {
-    background: var(--color-selection-bg);
-  }
-  .title {
-    min-width: 0;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .count {
+  .menu button :global(svg) {
     flex-shrink: 0;
-    margin-left: auto;
-    padding: 1px 6px;
-    border-radius: var(--radius-pill);
-    background: var(--color-hover-bg);
     color: var(--color-text-secondary);
-    font-size: var(--text-caption);
-    font-weight: var(--weight-medium);
-    line-height: 1.4;
   }
-  .row.selected .count,
-  .folder-row.selected .count {
-    background: var(--color-bg);
+  .menu button:hover:not(:disabled),
+  .menu button:focus-visible {
+    background: var(--color-hover-bg);
+    outline: none;
   }
-  .feed-health {
-    display: inline-flex;
-    flex-shrink: 0;
-    align-items: center;
-    margin: 0 1px;
+  .menu button:disabled {
+    color: var(--color-text-tertiary);
+    cursor: default;
+  }
+  .menu button.indented {
+    padding-left: calc(var(--space-2) + 14px + var(--space-2));
+  }
+  .menu-separator {
+    height: 1px;
+    margin: var(--space-1) 0;
+    background: var(--color-border);
+  }
+  .menu-error {
+    margin: 2px var(--space-2) var(--space-1);
     color: var(--color-error);
-  }
-  .row-icon {
-    display: inline-flex;
-    width: 14px;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-    color: var(--color-text-tertiary);
-  }
-  .section-label {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin: 18px 5px 5px 9px;
-    padding-top: 14px;
-    border-top: 1px solid var(--color-border);
-    color: var(--color-text-tertiary);
-    font-size: var(--text-caption);
-    font-weight: var(--weight-bold);
-    letter-spacing: 0.08em;
-  }
-  .section-label button {
-    flex-shrink: 0;
-    border: 0;
-    background: transparent;
-    color: var(--color-text-tertiary);
-    font: inherit;
-    font-size: var(--text-caption);
-    font-weight: var(--weight-bold);
-    letter-spacing: normal;
-    text-transform: none;
-    cursor: pointer;
-  }
-  .section-label button:hover {
-    color: var(--color-accent);
-  }
-  .folder-row {
-    display: flex;
-    align-items: center;
-    border-radius: var(--radius-sm);
-    transition:
-      background-color var(--transition),
-      outline-color var(--transition);
-  }
-  .folder-select {
-    flex: 1;
-    font-weight: var(--weight-medium);
-  }
-  .folder-collapse {
-    display: grid;
-    width: 20px;
-    height: 20px;
-    flex: 0 0 20px;
-    place-items: center;
-    margin-left: 2px;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-text-tertiary);
-    cursor: pointer;
-  }
-  .chevron {
-    display: inline-block;
-    transition: transform var(--transition);
-  }
-  .chevron.collapsed {
-    transform: rotate(-90deg);
-  }
-  .nested {
-    font-size: var(--text-body);
-  }
-  .folder-children {
-    margin: 2px 0 2px 12px;
-    padding-left: 9px;
-    border-left: 1px solid var(--color-text-tertiary);
-  }
-  .unfiled-label {
-    margin-top: 20px;
-  }
-
-  .unfiled-group,
-  .folder-row.drag-over,
-  .unfiled-group.drag-over {
-    border-radius: var(--radius-sm);
-  }
-
-  .folder-row.drag-over,
-  .unfiled-group.drag-over {
-    outline: 2px solid var(--color-accent);
-    outline-offset: -2px;
-    background: var(--color-selection-bg);
-  }
-
-  /* Nothing unread: stays listed (so the sidebar doesn't reshuffle) but
-     recedes, letting feeds with something to read stand out. */
-  .row.quiet:not(.selected) .title {
-    color: var(--color-text-secondary);
-  }
-
-  .caught-up {
-    margin: var(--space-4) var(--space-3);
-    color: var(--color-text-tertiary);
     font-size: var(--text-small);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  .menu-label {
+    margin: 2px var(--space-2);
+    color: var(--color-text-tertiary);
+    font-size: var(--text-caption);
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 </style>

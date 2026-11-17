@@ -56,6 +56,9 @@ export interface ItemFilter {
   publishedTo?: number | null;
 }
 
+/** What a sidebar action (mark read, open settings) applies to. */
+export type SidebarScope = { feedId: number } | { folderId: number };
+
 export interface RetentionSettings {
   readRetentionDays: number;
   fullTextRetentionDays: number;

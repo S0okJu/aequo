@@ -48,6 +48,11 @@ export const ICONS: Record<string, string> = {
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
 
   'check-all': '<path d="M3 12.5l4 4L15 8"/><path d="M11 16.5l1 1L21 8"/>',
+
+  inbox:
+    '<path d="M4 13l2.5-7h11L20 13v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z"/><path d="M4 13h4.5l1 2h5l1-2H20"/>',
+
+  plus: '<path d="M12 5v14M5 12h14"/>',
 };
 
 export type IconName = keyof typeof ICONS;
