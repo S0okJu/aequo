@@ -493,8 +493,8 @@
   .eyebrow {
     margin: 0 0 8px;
     color: var(--color-text-tertiary);
-    font-size: 0.75em;
-    font-weight: 650;
+    font-size: var(--text-small);
+    font-weight: var(--weight-bold);
     letter-spacing: 0.08em;
   }
 
@@ -507,13 +507,13 @@
 
   h1 {
     margin-bottom: 6px;
-    font-size: 1.75em;
+    font-size: var(--text-display);
     letter-spacing: -0.025em;
   }
 
   h2 {
     margin-bottom: 5px;
-    font-size: 1.05em;
+    font-size: var(--text-heading);
   }
 
   .intro,
@@ -521,7 +521,7 @@
   .section-heading p {
     margin-bottom: 0;
     color: var(--color-text-secondary);
-    font-size: 0.9em;
+    font-size: var(--text-body);
   }
 
   button {
@@ -532,7 +532,7 @@
     background: var(--color-bg);
     color: var(--color-text);
     font: inherit;
-    font-size: 0.85em;
+    font-size: var(--text-body);
     cursor: pointer;
   }
 
@@ -554,7 +554,7 @@
     border: 1px solid transparent;
     background: transparent;
     color: var(--color-text-secondary);
-    font-weight: 600;
+    font-weight: var(--weight-medium);
   }
 
   .back:hover:not(:disabled) {
@@ -579,13 +579,13 @@
     border-radius: 0;
     background: transparent;
     color: var(--color-text-tertiary);
-    font-size: 0.88em;
+    font-size: var(--text-body);
   }
 
   .tabs button.active {
     border-bottom-color: var(--color-accent);
     color: var(--color-text);
-    font-weight: 600;
+    font-weight: var(--weight-medium);
   }
 
   .tabs button:hover:not(:disabled) {
@@ -607,8 +607,8 @@
   .retention-fields label {
     display: grid;
     gap: 7px;
-    font-size: 0.85em;
-    font-weight: 600;
+    font-size: var(--text-body);
+    font-weight: var(--weight-medium);
   }
 
   .retention-fields select {
@@ -625,8 +625,8 @@
   .retention-note,
   .cleanup-preview {
     color: var(--color-text-secondary);
-    font-size: 0.8em;
-    font-weight: 400;
+    font-size: var(--text-small);
+    font-weight: var(--weight-regular);
     line-height: 1.5;
   }
 
@@ -662,8 +662,8 @@
     max-width: 360px;
     gap: 7px;
     margin-top: 18px;
-    font-size: 0.85em;
-    font-weight: 600;
+    font-size: var(--text-body);
+    font-weight: var(--weight-medium);
   }
 
   .theme-control select {
@@ -678,8 +678,8 @@
 
   .theme-control small {
     color: var(--color-text-secondary);
-    font-size: 0.9em;
-    font-weight: 400;
+    font-size: var(--text-small);
+    font-weight: var(--weight-regular);
   }
 
   @media (max-width: 640px) {
@@ -776,14 +776,14 @@
 
   .feed-card h3 {
     margin-bottom: 3px;
-    font-size: 0.95em;
-    font-weight: 600;
+    font-size: var(--text-title);
+    font-weight: var(--weight-medium);
   }
 
   .url {
     margin-bottom: 0;
     color: var(--color-text-tertiary);
-    font-size: 0.8em;
+    font-size: var(--text-small);
     overflow-wrap: anywhere;
   }
 
@@ -803,8 +803,8 @@
     border-radius: var(--radius-pill);
     background: var(--color-hover-bg);
     color: var(--color-text-secondary);
-    font-size: 0.74em;
-    font-weight: 600;
+    font-size: var(--text-caption);
+    font-weight: var(--weight-medium);
     line-height: 1.6;
   }
 
@@ -825,7 +825,7 @@
     display: grid;
     gap: 4px;
     color: var(--color-text-secondary);
-    font-size: 0.73em;
+    font-size: var(--text-small);
   }
   .setting-control select {
     min-height: 30px;
@@ -845,7 +845,7 @@
     gap: 8px;
     padding: 4px 2px;
     color: var(--color-text-secondary);
-    font-size: 0.75em;
+    font-size: var(--text-small);
     cursor: pointer;
   }
   .visibility-control input {

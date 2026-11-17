@@ -686,7 +686,7 @@
     background: transparent;
     color: var(--color-text-secondary);
     font: inherit;
-    font-size: 0.85em;
+    font-size: var(--text-body);
     text-align: left;
     cursor: pointer;
   }
@@ -747,8 +747,8 @@
   }
 
   .ai-rail-label {
-    font-size: 0.62em;
-    font-weight: 650;
+    font-size: var(--text-caption);
+    font-weight: var(--weight-bold);
     letter-spacing: 0.06em;
   }
 

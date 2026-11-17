@@ -397,7 +397,7 @@
     background: transparent;
     color: var(--color-text);
     font: inherit;
-    font-size: 0.86em;
+    font-size: var(--text-body);
     text-align: left;
     cursor: pointer;
   }
@@ -430,7 +430,7 @@
   .empty-folder-hint {
     margin: 2px 5px 6px 0;
     color: var(--color-text-tertiary);
-    font-size: 0.76em;
+    font-size: var(--text-small);
     font-style: italic;
     line-height: 1.4;
   }
@@ -445,7 +445,6 @@
     background: transparent;
     color: var(--color-text-tertiary);
     font: inherit;
-    font-size: 0.9em;
     cursor: pointer;
     opacity: 0;
   }
@@ -491,7 +490,7 @@
     background: transparent;
     color: var(--color-text);
     font: inherit;
-    font-size: 0.82em;
+    font-size: var(--text-body);
     text-align: left;
     cursor: pointer;
     white-space: nowrap;
@@ -520,8 +519,8 @@
     border-radius: var(--radius-pill);
     background: var(--color-hover-bg);
     color: var(--color-text-secondary);
-    font-size: 0.72em;
-    font-weight: 600;
+    font-size: var(--text-caption);
+    font-weight: var(--weight-medium);
     line-height: 1.4;
   }
   .row.selected .count,
@@ -551,8 +550,8 @@
     padding-top: 14px;
     border-top: 1px solid var(--color-border);
     color: var(--color-text-tertiary);
-    font-size: 0.68em;
-    font-weight: 650;
+    font-size: var(--text-caption);
+    font-weight: var(--weight-bold);
     letter-spacing: 0.08em;
   }
   .section-label button {
@@ -561,8 +560,8 @@
     background: transparent;
     color: var(--color-text-tertiary);
     font: inherit;
-    font-size: 0.9em;
-    font-weight: 650;
+    font-size: var(--text-caption);
+    font-weight: var(--weight-bold);
     letter-spacing: normal;
     text-transform: none;
     cursor: pointer;
@@ -580,7 +579,7 @@
   }
   .folder-select {
     flex: 1;
-    font-weight: 600;
+    font-weight: var(--weight-medium);
   }
   .folder-collapse {
     display: grid;
@@ -603,7 +602,7 @@
     transform: rotate(-90deg);
   }
   .nested {
-    font-size: 0.81em;
+    font-size: var(--text-body);
   }
   .folder-children {
     margin: 2px 0 2px 12px;

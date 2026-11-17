@@ -107,7 +107,7 @@
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-text-secondary);
-    font-size: 0.95em;
+    font-size: var(--text-body);
     cursor: pointer;
   }
 

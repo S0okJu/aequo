@@ -82,7 +82,7 @@
     flex: 1;
     margin: 0;
     color: var(--color-text);
-    font-size: var(--font-size-sm);
+    font-size: var(--text-small);
     line-height: 1.4;
   }
 

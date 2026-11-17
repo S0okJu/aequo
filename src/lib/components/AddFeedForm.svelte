@@ -105,7 +105,7 @@
     background: var(--color-bg);
     color: var(--color-text);
     font: inherit;
-    font-size: 0.85em;
+    font-size: var(--text-body);
   }
 
   input:disabled {
@@ -114,7 +114,7 @@
 
   button {
     font: inherit;
-    font-size: 0.85em;
+    font-size: var(--text-body);
     padding: 6px 9px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
@@ -134,7 +134,7 @@
 
   .error-card {
     margin-top: 8px;
-    font-size: 0.8em;
+    font-size: var(--text-small);
     word-break: break-word;
   }
 </style>

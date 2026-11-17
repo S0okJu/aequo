@@ -67,14 +67,20 @@
     --space-5: 24px;
     --space-6: 32px;
 
-    /* Minimal type scale - additive only. Existing components keep their
-       current em-based sizes; new/touched code (toasts, error cards,
-       spinner) pulls from here instead of inventing another scale. */
-    --font-size-xs: 11px;
-    --font-size-sm: 12px;
-    --font-size-base: 13px;
-    --font-size-md: 14px;
-    --font-size-lg: 15px;
+    /* Role-based type scale (docs/UI_SIMPLIFICATION_PLAN.md §3.13). Every
+       component font-size must be one of these - px, not em, so a size
+       never compounds through nesting. Nothing renders below --text-caption.
+       `pnpm check` enforces this via scripts/check-type-scale.sh. */
+    --text-caption: 11px;
+    --text-small: 12px;
+    --text-body: 13px;
+    --text-title: 14px;
+    --text-heading: 17px;
+    --text-display: 22px;
+    --text-reading: 16px;
+    --weight-regular: 400;
+    --weight-medium: 550;
+    --weight-bold: 650;
 
     /* Readability caps for the desktop-only responsive pass: prose text
        stays at a comfortable line length, and card lists stop stretching
@@ -147,7 +153,10 @@
   :global(body) {
     margin: 0;
     min-height: 100%;
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+    font-family:
+      -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Apple SD Gothic Neo', sans-serif;
+    font-size: var(--text-body);
+    line-height: 1.5;
     background: var(--color-bg-secondary);
     color: var(--color-text);
   }
@@ -215,22 +224,21 @@
     border-radius: var(--radius-xl);
     background: var(--color-bg-secondary);
     color: var(--color-text-tertiary);
-    font-size: 1.2em;
   }
 
   :global(.empty-placeholder h1),
   :global(.empty-placeholder h3) {
     margin: 0;
     color: var(--color-text);
-    font-size: 0.95em;
-    font-weight: 620;
+    font-size: var(--text-title);
+    font-weight: var(--weight-bold);
   }
 
   :global(.empty-placeholder p) {
     max-width: 280px;
     margin: 0;
     color: var(--color-text-secondary);
-    font-size: 0.82em;
+    font-size: var(--text-body);
     line-height: 1.5;
   }
 
@@ -248,7 +256,7 @@
     border-radius: var(--radius-md);
     background: var(--color-bg-secondary);
     color: var(--color-text-secondary);
-    font-size: 0.8em;
+    font-size: var(--text-body);
     line-height: 1.4;
   }
 
@@ -266,7 +274,7 @@
     background: var(--color-bg);
     color: var(--color-text);
     font: inherit;
-    font-size: 0.9em;
+    font-size: var(--text-small);
     cursor: pointer;
   }
 
@@ -322,13 +330,13 @@
     display: block;
     margin-bottom: 3px;
     color: var(--color-error);
-    font-size: 0.78em;
+    font-size: var(--text-small);
   }
 
   :global(.error-copy p) {
     margin: 0;
     color: var(--color-text-secondary);
-    font-size: 0.78em;
+    font-size: var(--text-small);
     line-height: 1.4;
     overflow-wrap: anywhere;
   }
@@ -341,7 +349,7 @@
     background: var(--color-bg);
     color: var(--color-text-secondary);
     font: inherit;
-    font-size: 0.78em;
+    font-size: var(--text-small);
     cursor: pointer;
   }
 

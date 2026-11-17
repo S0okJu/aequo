@@ -701,8 +701,8 @@
 
   h2 {
     margin: 0;
-    font-size: 0.95em;
-    font-weight: 650;
+    font-size: var(--text-title);
+    font-weight: var(--weight-bold);
   }
 
   .local-status {
@@ -714,7 +714,7 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-pill);
     color: var(--color-text-tertiary);
-    font-size: 0.62em;
+    font-size: var(--text-caption);
   }
 
   .collapse-panel {
@@ -729,7 +729,6 @@
     background: transparent;
     color: var(--color-text-secondary);
     font: inherit;
-    font-size: 0.85em;
     cursor: pointer;
   }
 
@@ -759,14 +758,14 @@
     background: transparent;
     color: var(--color-text-tertiary);
     font: inherit;
-    font-size: 0.82em;
+    font-size: var(--text-body);
     cursor: pointer;
   }
 
   .tabs button.active {
     border-bottom-color: var(--color-accent);
     color: var(--color-text);
-    font-weight: 600;
+    font-weight: var(--weight-medium);
   }
 
   .tabs button:disabled {
@@ -788,8 +787,8 @@
 
   .provider-label {
     color: var(--color-text-tertiary);
-    font-size: 0.58em;
-    font-weight: 700;
+    font-size: var(--text-caption);
+    font-weight: var(--weight-bold);
     letter-spacing: 0.09em;
     border-bottom: 1px solid var(--color-border);
   }
@@ -802,7 +801,7 @@
     background: transparent;
     color: var(--color-text-secondary);
     font: inherit;
-    font-size: 0.77em;
+    font-size: var(--text-small);
     cursor: pointer;
   }
 
@@ -810,7 +809,7 @@
     border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
     background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg));
     color: var(--color-text);
-    font-weight: 600;
+    font-weight: var(--weight-medium);
   }
 
   .provider-picker .new-chat {
@@ -844,8 +843,8 @@
   .context-label {
     flex-shrink: 0;
     color: var(--color-text-tertiary);
-    font-size: 0.66em;
-    font-weight: 700;
+    font-size: var(--text-caption);
+    font-weight: var(--weight-bold);
     letter-spacing: 0.06em;
   }
 
@@ -853,8 +852,8 @@
     overflow: hidden;
     color: var(--color-text-secondary);
     color: var(--color-text);
-    font-size: 0.76em;
-    font-weight: 550;
+    font-size: var(--text-small);
+    font-weight: var(--weight-medium);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -868,7 +867,6 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     color: var(--color-text-secondary);
-    font-size: 0.88em;
     text-decoration: none;
   }
 
@@ -880,7 +878,7 @@
   .conversation-state {
     flex: 0 0 auto;
     color: var(--color-text-tertiary);
-    font-size: 0.62em;
+    font-size: var(--text-caption);
   }
 
   .chat-messages,
@@ -916,20 +914,19 @@
     border-radius: var(--radius-xl);
     background: color-mix(in srgb, var(--color-accent) 9%, var(--color-bg));
     color: var(--color-accent);
-    font-size: 1.15em;
   }
 
   .chat-empty h3 {
     margin: 0;
     color: var(--color-text);
-    font-size: 0.9em;
-    font-weight: 620;
+    font-size: var(--text-title);
+    font-weight: var(--weight-bold);
   }
 
   .chat-empty p {
     max-width: 240px;
     margin: 0;
-    font-size: 0.82em;
+    font-size: var(--text-body);
     line-height: 1.5;
   }
 
@@ -949,7 +946,7 @@
     background: var(--color-bg);
     color: var(--color-text-secondary);
     font: inherit;
-    font-size: 0.68em;
+    font-size: var(--text-small);
     cursor: pointer;
     transition:
       border-color 120ms ease,
@@ -974,8 +971,8 @@
     background: var(--color-accent-solid);
     color: var(--color-on-accent);
     font: inherit;
-    font-size: 0.82em;
-    font-weight: 600;
+    font-size: var(--text-body);
+    font-weight: var(--weight-medium);
     cursor: pointer;
   }
 
@@ -986,7 +983,7 @@
   .hint,
   .subtle {
     color: var(--color-text-tertiary);
-    font-size: 0.76em;
+    font-size: var(--text-small);
   }
 
   .transcript-empty,
@@ -997,7 +994,7 @@
     border-radius: var(--radius-md);
     background: var(--color-bg-secondary);
     color: var(--color-text-tertiary);
-    font-size: 0.72em;
+    font-size: var(--text-caption);
     line-height: 1.45;
   }
 
@@ -1035,7 +1032,7 @@
     background: transparent;
     color: var(--color-text-tertiary);
     font: inherit;
-    font-size: 0.65em;
+    font-size: var(--text-caption);
     cursor: pointer;
   }
 
@@ -1049,13 +1046,13 @@
     display: block;
     margin-bottom: 5px;
     color: var(--color-text-tertiary);
-    font-size: 0.68em;
-    font-weight: 650;
+    font-size: var(--text-caption);
+    font-weight: var(--weight-bold);
   }
 
   .message-content {
     color: var(--color-text);
-    font-size: 0.8em;
+    font-size: var(--text-body);
     line-height: 1.55;
     overflow-wrap: anywhere;
   }
@@ -1078,14 +1075,14 @@
   }
 
   .message-content :global(h1) {
-    font-size: 1.25em;
+    font-size: var(--text-title);
   }
   .message-content :global(h2) {
-    font-size: 1.15em;
+    font-size: var(--text-title);
   }
   .message-content :global(h3),
   .message-content :global(h4) {
-    font-size: 1.05em;
+    font-size: var(--text-body);
   }
 
   .message-content :global(ul),
@@ -1111,7 +1108,7 @@
     border-radius: var(--radius-xs);
     background: color-mix(in srgb, var(--color-bg) 72%, var(--color-accent) 8%);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.9em;
+    font-size: var(--text-small);
   }
 
   .message-content :global(pre) {
@@ -1132,7 +1129,7 @@
     border: 0;
     background: transparent;
     color: var(--color-text);
-    font-size: 0.92em;
+    font-size: var(--text-small);
     white-space: pre;
   }
 
@@ -1141,7 +1138,7 @@
     align-items: center;
     gap: 4px;
     color: var(--color-text-secondary);
-    font-size: 0.78em;
+    font-size: var(--text-small);
   }
 
   .thinking span {
@@ -1202,7 +1199,7 @@
     background: transparent;
     color: var(--color-text);
     font: inherit;
-    font-size: 0.84em;
+    font-size: var(--text-body);
     line-height: 1.45;
   }
 
@@ -1217,7 +1214,7 @@
     gap: 8px;
     padding-top: 6px;
     color: var(--color-text-tertiary);
-    font-size: 0.64em;
+    font-size: var(--text-caption);
   }
 
   .composer-footer button {
@@ -1230,7 +1227,7 @@
     background: var(--color-accent-solid);
     color: var(--color-on-accent);
     font: inherit;
-    font-size: 1.15em;
+    font-size: var(--text-small);
     cursor: pointer;
   }
 
@@ -1244,14 +1241,14 @@
 
   .history-heading h3 {
     margin: 0 0 3px;
-    font-size: 1em;
-    font-weight: 650;
+    font-size: var(--text-title);
+    font-weight: var(--weight-bold);
   }
 
   .history-heading p {
     margin: 0;
     color: var(--color-text-tertiary);
-    font-size: 0.82em;
+    font-size: var(--text-body);
   }
 
   .history-row {
@@ -1304,23 +1301,23 @@
     border-radius: var(--radius-pill);
     background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg));
     color: var(--color-accent);
-    font-size: 0.76em;
-    font-weight: 650;
+    font-size: var(--text-small);
+    font-weight: var(--weight-bold);
   }
 
   .history-title {
     width: 100%;
     overflow: hidden;
-    font-size: 0.92em;
+    font-size: var(--text-body);
     line-height: 1.35;
-    font-weight: 550;
+    font-weight: var(--weight-medium);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .history-row time {
     color: var(--color-text-tertiary);
-    font-size: 0.76em;
+    font-size: var(--text-small);
   }
 
   .remove-session {
@@ -1360,7 +1357,7 @@
     background: var(--color-bg);
     color: var(--color-text-secondary);
     font: inherit;
-    font-size: 0.68em;
+    font-size: var(--text-caption);
     cursor: pointer;
   }
 
@@ -1399,7 +1396,7 @@
   .history-note {
     margin: 0 12px 10px;
     color: var(--color-text-tertiary);
-    font-size: 0.78em;
+    font-size: var(--text-small);
     line-height: 1.5;
   }
 
@@ -1416,7 +1413,7 @@
     padding: 8px 11px;
     border-top: 1px solid var(--color-border);
     color: var(--color-text-tertiary);
-    font-size: 0.65em;
+    font-size: var(--text-caption);
     line-height: 1.35;
   }
 

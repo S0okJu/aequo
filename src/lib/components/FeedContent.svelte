@@ -542,8 +542,8 @@
 <style>
   .content {
     color: var(--color-text);
-    font-size: 0.95em;
-    line-height: 1.65;
+    font-size: var(--text-reading);
+    line-height: 1.7;
     word-break: keep-all;
     overflow-wrap: break-word;
   }
@@ -552,14 +552,14 @@
     display: -webkit-box;
     overflow: hidden;
     color: var(--color-text-secondary);
-    font-size: 0.9em;
+    font-size: var(--text-body);
     line-height: 1.55;
     line-clamp: 2;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
   }
 
-  .video-link { display: inline-block; margin-block: 6px; color: var(--color-accent); font-size: .88em; font-weight: 600; text-decoration: none; }
+  .video-link { display: inline-block; margin-block: 6px; color: var(--color-accent); font-size: var(--text-small); font-weight: var(--weight-medium); text-decoration: none; }
   .video-link:hover { text-decoration: underline; }
 
   .annotated-content {
@@ -591,7 +591,7 @@
     border-radius: 50%;
     background: var(--color-bg);
     color: var(--color-text-secondary);
-    font-size: 0.72em;
+    font-size: var(--text-caption);
     cursor: pointer;
   }
 
@@ -607,7 +607,7 @@
     border-radius: var(--radius-sm);
     background: var(--color-text);
     color: var(--color-bg);
-    font-size: 0.74em;
+    font-size: var(--text-small);
     white-space: nowrap;
   }
 
@@ -711,7 +711,7 @@
 
   .content :global(.code-keyword) {
     color: var(--code-keyword);
-    font-weight: 650;
+    font-weight: var(--weight-bold);
   }
   .content :global(.code-string) {
     color: var(--code-string);

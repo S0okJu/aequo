@@ -270,13 +270,13 @@
 
   h2 {
     margin: 0 0 5px;
-    font-size: 1.05em;
+    font-size: var(--text-heading);
   }
 
   .section-heading p {
     margin: 0;
     color: var(--color-text-secondary);
-    font-size: 0.9em;
+    font-size: var(--text-body);
   }
 
   button {
@@ -287,7 +287,7 @@
     background: var(--color-bg);
     color: var(--color-text);
     font: inherit;
-    font-size: 0.85em;
+    font-size: var(--text-body);
     cursor: pointer;
   }
 
@@ -336,7 +336,7 @@
     background: var(--color-bg);
     color: var(--color-text);
     font: inherit;
-    font-size: 0.85em;
+    font-size: var(--text-body);
   }
 
   .cancel {
@@ -346,7 +346,7 @@
   .field-error {
     margin: -6px 0 14px;
     color: var(--color-error);
-    font-size: 0.8em;
+    font-size: var(--text-small);
     line-height: 1.4;
   }
 
@@ -381,7 +381,7 @@
 
   .folder-name {
     overflow: hidden;
-    font-weight: 600;
+    font-weight: var(--weight-medium);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -392,8 +392,8 @@
     border-radius: var(--radius-pill);
     background: var(--color-hover-bg);
     color: var(--color-text-secondary);
-    font-size: 0.78em;
-    font-weight: 600;
+    font-size: var(--text-small);
+    font-weight: var(--weight-medium);
   }
 
   .folder-actions {

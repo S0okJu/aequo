@@ -132,7 +132,7 @@
     background: transparent;
     color: var(--color-error);
     font: inherit;
-    font-size: 0.82em;
+    font-size: var(--text-body);
     cursor: pointer;
   }
 
@@ -143,8 +143,8 @@
     background: var(--color-accent-solid);
     color: var(--color-on-accent);
     font: inherit;
-    font-size: 0.82em;
-    font-weight: 600;
+    font-size: var(--text-body);
+    font-weight: var(--weight-medium);
     cursor: pointer;
   }
 
@@ -162,7 +162,7 @@
     background: var(--color-bg-secondary);
     color: var(--color-text);
     font: inherit;
-    font-size: 0.85em;
+    font-size: var(--text-body);
     resize: vertical;
   }
 
@@ -175,6 +175,6 @@
 
   .count {
     color: var(--color-text-tertiary);
-    font-size: 0.72em;
+    font-size: var(--text-caption);
   }
 </style>

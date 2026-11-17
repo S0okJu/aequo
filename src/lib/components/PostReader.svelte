@@ -310,7 +310,7 @@
     background: var(--color-bg);
     color: var(--color-text-secondary);
     font: inherit;
-    font-size: 0.8em;
+    font-size: var(--text-body);
     cursor: pointer;
     white-space: nowrap;
   }
@@ -344,7 +344,7 @@
     gap: 6px;
     margin-right: auto;
     color: var(--color-text-tertiary);
-    font-size: 0.76em;
+    font-size: var(--text-small);
   }
 
   .article-state.full {
@@ -371,7 +371,7 @@
     background: var(--color-bg);
     color: var(--color-text-secondary);
     font: inherit;
-    font-size: 0.78em;
+    font-size: var(--text-small);
     cursor: pointer;
   }
 
@@ -401,20 +401,19 @@
     border-radius: 50%;
     background: var(--color-selection-bg);
     color: var(--color-accent);
-    font-size: 0.75em;
-    font-weight: 700;
+    font-weight: var(--weight-bold);
   }
 
   .fallback-notice strong,
   .article-loading strong {
     color: var(--color-text);
-    font-size: 0.82em;
+    font-size: var(--text-body);
   }
   .fallback-notice p,
   .article-loading p {
     margin: 3px 0 8px;
     color: var(--color-text-secondary);
-    font-size: 0.78em;
+    font-size: var(--text-small);
     line-height: 1.45;
   }
   .fallback-notice button {
@@ -423,8 +422,8 @@
     background: transparent;
     color: var(--color-accent);
     font: inherit;
-    font-size: 0.78em;
-    font-weight: 650;
+    font-size: var(--text-small);
+    font-weight: var(--weight-bold);
     cursor: pointer;
   }
   .article-loading {
@@ -438,15 +437,15 @@
   .source {
     margin: 0 0 8px;
     color: var(--color-accent);
-    font-size: 0.82em;
-    font-weight: 650;
+    font-size: var(--text-small);
+    font-weight: var(--weight-bold);
   }
 
   h1 {
     margin: 0 0 10px;
     color: var(--color-text);
-    font-size: clamp(1.4em, 5cqw, 2em);
-    font-weight: 650;
+    font-size: var(--text-display);
+    font-weight: var(--weight-bold);
     letter-spacing: -0.025em;
     line-height: 1.25;
     word-break: keep-all;
@@ -454,7 +453,7 @@
 
   time {
     color: var(--color-text-tertiary);
-    font-size: 0.82em;
+    font-size: var(--text-small);
   }
 
   .original-link {
@@ -469,8 +468,8 @@
     background: var(--color-accent-solid);
     color: var(--color-on-accent);
     font: inherit;
-    font-size: 0.88em;
-    font-weight: 650;
+    font-size: var(--text-body);
+    font-weight: var(--weight-bold);
     text-decoration: none;
     cursor: pointer;
   }
@@ -489,7 +488,6 @@
     background: var(--color-bg);
     color: var(--color-text-secondary);
     font: inherit;
-    font-size: 1.2em;
     cursor: pointer;
   }
 
@@ -524,8 +522,8 @@
   .memo-list h2 {
     margin: 0 0 10px;
     color: var(--color-text-secondary);
-    font-size: 0.8em;
-    font-weight: 650;
+    font-size: var(--text-small);
+    font-weight: var(--weight-bold);
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
@@ -562,18 +560,18 @@
 
   .memo-quote {
     color: var(--color-text-tertiary);
-    font-size: 0.78em;
+    font-size: var(--text-small);
   }
 
   .memo-note {
     color: var(--color-text);
-    font-size: 0.86em;
+    font-size: var(--text-body);
   }
 
   .memo-orphaned-badge {
     color: var(--color-error);
-    font-size: 0.72em;
-    font-weight: 650;
+    font-size: var(--text-caption);
+    font-weight: var(--weight-bold);
   }
 
   :global(.aequo-flash) {
