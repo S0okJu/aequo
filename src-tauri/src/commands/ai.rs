@@ -220,6 +220,76 @@ fn prepare_session(
     ))
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiProviderStatus {
+    pub provider: &'static str,
+    pub installed: bool,
+    pub version: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Whether each AI CLI is installed and runs (`--version`). This can't
+/// tell whether the user is signed in; the settings page says so rather
+/// than guessing.
+#[tauri::command]
+pub async fn check_ai_providers() -> Vec<AiProviderStatus> {
+    let mut statuses = Vec::new();
+    for provider in ["codex", "claude"] {
+        let status = match executable_path(provider) {
+            Err(error) => AiProviderStatus {
+                provider,
+                installed: false,
+                version: None,
+                error: Some(error),
+            },
+            Ok(path) => {
+                let output = tokio::time::timeout(
+                    Duration::from_secs(10),
+                    Command::new(path)
+                        .arg("--version")
+                        .stdin(Stdio::null())
+                        .kill_on_drop(true)
+                        .output(),
+                )
+                .await;
+                match output {
+                    Ok(Ok(output)) if output.status.success() => AiProviderStatus {
+                        provider,
+                        installed: true,
+                        version: String::from_utf8_lossy(&output.stdout)
+                            .lines()
+                            .next()
+                            .map(|line| line.trim().to_string())
+                            .filter(|line| !line.is_empty()),
+                        error: None,
+                    },
+                    Ok(Ok(output)) => AiProviderStatus {
+                        provider,
+                        installed: true,
+                        version: None,
+                        error: Some(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+                    },
+                    Ok(Err(error)) => AiProviderStatus {
+                        provider,
+                        installed: true,
+                        version: None,
+                        error: Some(error.to_string()),
+                    },
+                    Err(_) => AiProviderStatus {
+                        provider,
+                        installed: true,
+                        version: None,
+                        error: Some("timed out".to_string()),
+                    },
+                }
+            }
+        };
+        statuses.push(status);
+    }
+    statuses
+}
+
 #[tauri::command]
 pub fn list_ai_sessions(
     db_state: State<'_, std::sync::Mutex<Connection>>,

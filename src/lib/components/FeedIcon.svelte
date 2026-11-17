@@ -1,9 +1,10 @@
 <script lang="ts">
   import { feedIconUrl } from '$lib/feedIcons.svelte';
-  import { shortFeedTitle } from '$lib/format';
+  import { feedDisplayName } from '$lib/format';
 
   interface Props {
-    feed: { id: number; title: string | null; url: string } | undefined;
+    feed:
+      { id: number; title: string | null; url: string; customTitle?: string | null } | undefined;
     size?: number;
   }
 
@@ -17,11 +18,7 @@
     void src;
     broken = false;
   });
-  const initial = $derived(
-    shortFeedTitle(feed?.title, feed?.url ?? '?')
-      .slice(0, 1)
-      .toUpperCase(),
-  );
+  const initial = $derived((feed ? feedDisplayName(feed) : '?').slice(0, 1).toUpperCase());
 </script>
 
 {#if src && !broken}

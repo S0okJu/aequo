@@ -5,6 +5,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   AiProvider,
+  AiProviderStatus,
   AiStart,
   AiSession,
   AiTranscript,
@@ -46,6 +47,16 @@ export function updateFeedOrganization(
   hiddenFromAll: boolean,
 ): Promise<void> {
   return invoke('update_feed_organization', { feedId, folderId, hiddenFromAll });
+}
+
+/** Sets the feed's display name; null or blank restores its own title. */
+export function renameFeed(feedId: number, title: string | null): Promise<void> {
+  return invoke('rename_feed', { feedId, title });
+}
+
+/** Whether each AI CLI is installed (not whether the user is signed in). */
+export function checkAiProviders(): Promise<AiProviderStatus[]> {
+  return invoke('check_ai_providers');
 }
 
 export function setFeedRefreshInterval(feedId: number, intervalSecs: number): Promise<void> {

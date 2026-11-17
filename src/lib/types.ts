@@ -18,6 +18,8 @@ export interface FeedSummary {
   hiddenFromAll: boolean;
   /** Declared language tag from the feed (e.g. "ko", "en-us"), if any. */
   language: string | null;
+  /** The user's display name for the feed, if they set one. */
+  customTitle: string | null;
 }
 
 export interface FeedFolder {
@@ -94,6 +96,13 @@ export interface AiMessage {
   role: 'user' | 'assistant';
   content: string;
   createdAt: number;
+}
+
+export interface AiProviderStatus {
+  provider: AiProvider;
+  installed: boolean;
+  version: string | null;
+  error: string | null;
 }
 
 export interface AiStart {

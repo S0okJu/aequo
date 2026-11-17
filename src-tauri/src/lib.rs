@@ -60,6 +60,8 @@ pub fn run() {
             commands::ai::load_ai_transcript,
             commands::ai::start_ai_message,
             commands::ai::cancel_ai_message,
+            commands::ai::check_ai_providers,
+            commands::rename_feed,
             commands::ai::delete_ai_session,
             commands::annotations::list_item_annotations,
             commands::annotations::create_annotation,

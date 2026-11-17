@@ -66,6 +66,15 @@ export function stripSyndicationFooter(text: string | null | undefined): string 
   return stripped || null;
 }
 
+/** The name to show for a feed: the user's display name, else its trimmed title, else its URL. */
+export function feedDisplayName(feed: {
+  title: string | null;
+  url: string;
+  customTitle?: string | null;
+}): string {
+  return feed.customTitle?.trim() || shortFeedTitle(feed.title, feed.url);
+}
+
 /**
  * Drops the tagline many feeds append to their name ("The New Stack | DevOps,
  * Open Source, …" -> "The New Stack"). Only splits on a spaced separator so

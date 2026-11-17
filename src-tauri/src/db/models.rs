@@ -45,6 +45,8 @@ pub struct Feed {
     pub folder_id: Option<i64>,
     pub hidden_from_all: bool,
     pub language: Option<String>,
+    /// A display name the user chose; shown instead of `title` when set.
+    pub custom_title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

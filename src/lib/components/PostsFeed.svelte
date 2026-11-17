@@ -8,7 +8,7 @@
     formatDateTime,
     formatDayHeading,
     formatRelative,
-    shortFeedTitle,
+    feedDisplayName,
     stripSyndicationFooter,
   } from '$lib/format';
   import { t } from '$lib/i18n/index.svelte';
@@ -76,7 +76,7 @@
       : selectedToday
         ? t('posts.title.today')
         : selectedFeed
-          ? shortFeedTitle(selectedFeed.title, selectedFeed.url)
+          ? feedDisplayName(selectedFeed)
           : selectedFolder
             ? selectedFolder.name
             : t('posts.title.all'),
@@ -160,7 +160,7 @@
           <h2 class="date-heading">{formatDayHeading(item.publishedAt, nowSecs)}</h2>
         {/if}
         {@const feed = feedFor(item.feedId)}
-        {@const feedName = shortFeedTitle(feed?.title, feed?.url ?? t('common.unknownFeed'))}
+        {@const feedName = feed ? feedDisplayName(feed) : t('common.unknownFeed')}
         <div
           class="post"
           class:selected={selectedItemId === item.id}

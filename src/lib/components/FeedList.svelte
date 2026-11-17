@@ -4,7 +4,7 @@
   import Spinner from './Spinner.svelte';
   import FeedIcon from './FeedIcon.svelte';
   import { showToast } from '$lib/toast.svelte.ts';
-  import { shortFeedTitle } from '$lib/format';
+  import { feedDisplayName } from '$lib/format';
   import { t } from '$lib/i18n/index.svelte';
   import type { FeedFolder, FeedSummary, SidebarScope } from '$lib/types';
 
@@ -92,7 +92,7 @@
   );
 
   function feedName(feed: FeedSummary): string {
-    return shortFeedTitle(feed.title, feed.url);
+    return feedDisplayName(feed);
   }
 
   // Collapsed folders survive restarts; ids of deleted folders are simply

@@ -604,7 +604,12 @@ Claude Fable 5.2 vs. Fable 5.1: Fewer refusals…
 - §3.9 스트리밍 항목. 순서: 각 CLI 실제 출력 캡처(fixture) → `spawn` + 줄 단위 파서 → `ai-stream` 이벤트 → 프론트 이어 붙이기 →
   무응답 타임아웃. 중지(UI9)와 child 보관 구조를 공유하므로 **UI9 직후** 진행한다.
 
-### UI11. 설정 화면 재구성 — [ ]
+### UI11. 설정 화면 재구성 — [x]
+- 구현 중 결정됨: `FeedSettings`/`FolderSettings`를 `settings/` 아래 섹션별 컴포넌트(일반·구독·AI·저장 공간)와 공용 `SettingsRow`로 대체했다. 섹션은 `?section=`(기존 `?tab=`은 매핑)에서 파생되어 직접 진입·뒤로/앞으로가 동작하고,
+  사이드바의 "피드 설정…"은 `?section=subscriptions&feed=<id>`로 해당 피드 상세를 연 채 들어온다. 구독 목록은 폴더별 그룹 + "확인 필요"(오류 피드 바로가기, 개수 중복 집계 안 함),
+  폴더 이름 변경/삭제는 그룹 헤더 hover, 새 폴더는 목록 끝 인라인 폼. 상세 패널은 피드 선택 시에만 생기고 콘텐츠 폭 700px 이하에서는 목록 위에 겹친다. Esc는 인라인 편집 → 상세 → 설정 순으로 닫는다.
+  AI 섹션의 CLI 상태는 `--version` 실행 결과만 보여주고 로그인 여부는 알 수 없다고 명시한다(`SIDEBAR_SETTINGS_UX_GOAL.md` 규칙). 피드 드래그 이동은 설정에서는 상세의 폴더 선택으로 대신한다(사이드바에는 드래그 유지).
+  설정에서 돌아올 때 읽던 글·스크롤 복원은 이번 범위에서 하지 않았다.
 - §3.10. 세로 내비게이션 + `SettingsRow`, 구독 섹션(폴더별 목록·검색·오류 그룹·상세), AI 섹션(+ `check_ai_providers`),
   저장 공간 자동 저장. `FeedSettings.test.ts`, `FolderSettings.test.ts` 갱신.
 - UI7(다이얼로그)과 UI8(favicon)이 먼저 끝나 있어야 구독 섹션을 한 번에 완성할 수 있다.

@@ -150,6 +150,7 @@ pub fn apply(conn: &Connection) -> Result<()> {
         ("hidden_from_all", "INTEGER NOT NULL DEFAULT 0"),
         ("last_checked_at", "INTEGER NOT NULL DEFAULT 0"),
         ("language", "TEXT"),
+        ("custom_title", "TEXT"),
     ] {
         let exists = {
             let mut statement = conn.prepare("PRAGMA table_info(feeds)")?;

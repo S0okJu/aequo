@@ -89,6 +89,27 @@ pub fn mark_read(db_state: State<'_, Mutex<Connection>>, item_id: i64) -> Result
     db::mark_read(&conn, item_id, now_unix()).map_err(|e| e.to_string())
 }
 
+/// Renames a feed for display; an empty name restores the feed's own title.
+#[tauri::command]
+pub fn rename_feed(
+    db_state: State<'_, Mutex<Connection>>,
+    feed_id: i64,
+    title: Option<String>,
+) -> Result<(), String> {
+    let title = title.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    if title.as_ref().is_some_and(|t| t.chars().count() > 200) {
+        return Err("name is too long".to_string());
+    }
+    let conn = db_state
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    if db::set_feed_custom_title(&conn, feed_id, title.as_deref()).map_err(|e| e.to_string())? {
+        Ok(())
+    } else {
+        Err(format!("feed {feed_id} was not found"))
+    }
+}
+
 /// Marks every unread item in a view as read; returns the affected ids for
 /// undo. `fetched_before` is when the frontend loaded the view.
 #[tauri::command]

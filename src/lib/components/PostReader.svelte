@@ -10,7 +10,7 @@
   import FeedIcon from './FeedIcon.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import Spinner from './Spinner.svelte';
-  import { formatDateTime, shortFeedTitle, stripSyndicationFooter } from '$lib/format';
+  import { feedDisplayName, formatDateTime, stripSyndicationFooter } from '$lib/format';
   import { t } from '$lib/i18n/index.svelte';
   import type { Annotation, ArticleView, FeedSummary, Item } from '$lib/types';
   import type { CreateAnnotationInput, ReanchoredUpdate } from './FeedContent.svelte';
@@ -158,9 +158,7 @@
         <div class="header-bar">
           <p class="byline">
             <FeedIcon {feed} />
-            <span class="source"
-              >{shortFeedTitle(feed?.title, feed?.url ?? t('common.unknownFeed'))}</span
-            >
+            <span class="source">{feed ? feedDisplayName(feed) : t('common.unknownFeed')}</span>
             <span aria-hidden="true">·</span>
             <time datetime={new Date(item.publishedAt * 1000).toISOString()}>
               {formatDateTime(item.publishedAt)}

@@ -112,10 +112,11 @@ fn row_to_feed(row: &rusqlite::Row) -> rusqlite::Result<Feed> {
         folder_id: row.get(11)?,
         hidden_from_all: row.get::<_, i64>(12)? != 0,
         language: row.get(13)?,
+        custom_title: row.get(14)?,
     })
 }
 
-const FEED_COLUMNS: &str = "id, url, title, format, etag, last_modified, interval_secs, next_fetch_at, last_error, consecutive_failures, created_at, folder_id, hidden_from_all, language";
+const FEED_COLUMNS: &str = "id, url, title, format, etag, last_modified, interval_secs, next_fetch_at, last_error, consecutive_failures, created_at, folder_id, hidden_from_all, language, custom_title";
 
 fn row_to_folder(row: &rusqlite::Row) -> rusqlite::Result<FeedFolder> {
     Ok(FeedFolder {
@@ -302,6 +303,14 @@ pub fn update_feed_not_modified(conn: &Connection, feed_id: i64, next_fetch_at: 
 
 /// Records a `200 OK` response: the new etag/last_modified, the next
 /// poll time, and clears any prior failure state (§7).
+/// Sets (or with `None`, clears) the user's display name for a feed.
+pub fn set_feed_custom_title(conn: &Connection, feed_id: i64, title: Option<&str>) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE feeds SET custom_title = ?1 WHERE id = ?2",
+        params![title, feed_id],
+    )? > 0)
+}
+
 /// Records the feed's declared language (see `fetch::parser::feed_language`).
 pub fn set_feed_language(conn: &Connection, feed_id: i64, language: Option<&str>) -> Result<()> {
     conn.execute(

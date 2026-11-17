@@ -21,6 +21,7 @@ const feeds: FeedSummary[] = [
     folderId: null,
     hiddenFromAll: false,
     language: null,
+    customTitle: null,
   },
   {
     id: 2,
@@ -38,6 +39,7 @@ const feeds: FeedSummary[] = [
     folderId: null,
     hiddenFromAll: false,
     language: null,
+    customTitle: null,
   },
 ];
 

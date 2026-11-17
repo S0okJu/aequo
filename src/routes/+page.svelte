@@ -409,10 +409,12 @@
   }
 
   // Feed and folder settings live on the settings page; the sidebar links
-  // straight to the relevant tab.
+  // straight to the subscriptions section, with the feed's details open.
   function openSettings(scope?: SidebarScope) {
-    const tab = scope && 'folderId' in scope ? 'folders' : 'feeds';
-    goto(resolve(`/settings?tab=${tab}`));
+    if (!scope) goto(resolve('/settings'));
+    else if ('feedId' in scope)
+      goto(resolve(`/settings?section=subscriptions&feed=${scope.feedId}`));
+    else goto(resolve('/settings?section=subscriptions'));
   }
 
   let addFeedOpen = $state(false);
