@@ -121,7 +121,9 @@ describe('FeedContent', () => {
       },
     });
 
-    await flushMicrotasks();
+    // Re-anchoring hashes the text asynchronously (crypto.subtle), which can
+    // take longer than a couple of macrotask turns under a full-suite load.
+    await vi.waitFor(() => expect(onReanchored).toHaveBeenCalled());
 
     expect(onReanchored).toHaveBeenCalledTimes(1);
     const updates = onReanchored.mock.calls[0][0];
