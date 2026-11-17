@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod events;
 mod fetch;
+mod icons;
 mod scheduler;
 
 use std::sync::{Arc, Mutex};
@@ -35,9 +36,18 @@ pub fn run() {
             let schedule_changed = Arc::new(tokio::sync::Notify::new());
             app.manage(schedule_changed.clone());
             tauri::async_runtime::spawn(scheduler::run(
-                scheduler_conn,
+                scheduler_conn.clone(),
                 app.handle().clone(),
                 schedule_changed,
+            ));
+
+            // Feed icons share the scheduler's background connection.
+            let icon_sync = icons::IconSync::default();
+            app.manage(icon_sync.clone());
+            tauri::async_runtime::spawn(icons::run(
+                scheduler_conn,
+                app.handle().clone(),
+                icon_sync,
             ));
 
             Ok(())
@@ -55,6 +65,7 @@ pub fn run() {
             commands::annotations::delete_annotation,
             commands::refresh_feed::refresh_feed,
             commands::list_feeds,
+            commands::get_feed_icons,
             commands::list_items,
             commands::list_feed_folders,
             commands::create_feed_folder,

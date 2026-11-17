@@ -87,6 +87,10 @@ pub fn delete_feed(conn: &Connection, feed_id: i64) -> Result<bool> {
         params![feed_id],
     )?;
     tx.execute("DELETE FROM items WHERE feed_id = ?1", params![feed_id])?;
+    tx.execute(
+        "DELETE FROM feed_icons WHERE feed_id = ?1",
+        params![feed_id],
+    )?;
     let deleted = tx.execute("DELETE FROM feeds WHERE id = ?1", params![feed_id])? > 0;
     tx.commit()?;
     Ok(deleted)
@@ -140,6 +144,62 @@ pub fn rename_feed_folder(conn: &Connection, folder_id: i64, name: &str) -> Resu
         "UPDATE feed_folders SET name=?1 WHERE id=?2",
         params![name.trim(), folder_id],
     )? > 0)
+}
+
+/// Feeds whose icon is missing, older than `refresh_before` (a stored icon)
+/// or older than `retry_before` (a failed lookup), as (id, url).
+pub fn feeds_needing_icons(
+    conn: &Connection,
+    refresh_before: i64,
+    retry_before: i64,
+) -> Result<Vec<(i64, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT f.id, f.url FROM feeds f LEFT JOIN feed_icons i ON i.feed_id = f.id
+         WHERE i.feed_id IS NULL
+            OR (i.mime != '' AND i.fetched_at < ?1)
+            OR (i.mime = '' AND i.fetched_at < ?2)
+         ORDER BY f.id",
+    )?;
+    let rows = stmt.query_map(params![refresh_before, retry_before], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?;
+    rows.collect()
+}
+
+/// Stores a feed's icon; `mime = ""` with empty `data` records a failed
+/// lookup. A failure never overwrites a previously found icon.
+pub fn save_feed_icon(
+    conn: &Connection,
+    feed_id: i64,
+    mime: &str,
+    data: &[u8],
+    source_url: Option<&str>,
+    now: i64,
+) -> Result<()> {
+    if mime.is_empty() {
+        conn.execute(
+            "INSERT INTO feed_icons (feed_id, mime, data, source_url, fetched_at)
+             VALUES (?1, '', x'', NULL, ?2)
+             ON CONFLICT(feed_id) DO UPDATE SET fetched_at = excluded.fetched_at",
+            params![feed_id, now],
+        )?;
+    } else {
+        conn.execute(
+            "INSERT INTO feed_icons (feed_id, mime, data, source_url, fetched_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(feed_id) DO UPDATE SET mime = excluded.mime, data = excluded.data,
+                 source_url = excluded.source_url, fetched_at = excluded.fetched_at",
+            params![feed_id, mime, data, source_url, now],
+        )?;
+    }
+    Ok(())
+}
+
+/// Every stored icon as (feed id, mime, bytes); failed lookups excluded.
+pub fn list_feed_icons(conn: &Connection) -> Result<Vec<(i64, String, Vec<u8>)>> {
+    let mut stmt = conn.prepare("SELECT feed_id, mime, data FROM feed_icons WHERE mime != ''")?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+    rows.collect()
 }
 
 pub fn delete_feed_folder(conn: &Connection, folder_id: i64) -> Result<bool> {
@@ -867,6 +927,40 @@ mod tests {
         };
         mark_items_read(&conn, &filter, 1_700_000_100, 1_700_000_300).unwrap();
         assert_eq!(count_unread(&conn, feed_id).unwrap(), 0);
+    }
+
+    #[test]
+    fn feed_icons_track_due_refreshes_and_never_lose_a_good_icon() {
+        let conn = init_in_memory().unwrap();
+        let a = insert_feed(&conn, "https://a.example/feed.xml", None, None, 0).unwrap();
+        let b = insert_feed(&conn, "https://b.example/feed.xml", None, None, 0).unwrap();
+        assert_eq!(feeds_needing_icons(&conn, 0, 0).unwrap().len(), 2);
+
+        save_feed_icon(
+            &conn,
+            a,
+            "image/png",
+            b"png",
+            Some("https://a.example/i.png"),
+            100,
+        )
+        .unwrap();
+        save_feed_icon(&conn, b, "", &[], None, 100).unwrap();
+        // Neither is due yet...
+        assert!(feeds_needing_icons(&conn, 50, 50).unwrap().is_empty());
+        // ...a failed lookup comes back after its (shorter) retry window.
+        assert_eq!(
+            feeds_needing_icons(&conn, 50, 150).unwrap(),
+            [(b, "https://b.example/feed.xml".to_string())]
+        );
+
+        // A later failure for `a` keeps the stored icon.
+        save_feed_icon(&conn, a, "", &[], None, 200).unwrap();
+        let icons = list_feed_icons(&conn).unwrap();
+        assert_eq!(icons, [(a, "image/png".to_string(), b"png".to_vec())]);
+
+        delete_feed(&conn, a).unwrap();
+        assert!(list_feed_icons(&conn).unwrap().is_empty());
     }
 
     #[test]

@@ -6,6 +6,7 @@ pub mod article_fetch;
 pub mod client;
 pub mod discovery;
 pub mod enrichment;
+pub mod favicon;
 pub mod hydration;
 pub mod parser;
 mod raw_content;

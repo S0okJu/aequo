@@ -3,12 +3,14 @@
   import { applyThemePreference, getThemePreference } from '$lib/theme';
   import ToastHost from '$lib/components/ToastHost.svelte';
   import { applyDocumentLanguage } from '$lib/i18n/index.svelte';
+  import { startFeedIconSync } from '$lib/feedIcons.svelte';
 
   let { children } = $props();
 
   onMount(() => {
     applyThemePreference(getThemePreference());
     applyDocumentLanguage();
+    startFeedIconSync();
   });
 </script>
 

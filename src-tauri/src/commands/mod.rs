@@ -44,6 +44,25 @@ pub fn list_feeds(db_state: State<'_, Mutex<Connection>>) -> Result<Vec<FeedSumm
         .collect()
 }
 
+/// Every stored feed icon as a `data:` URI, keyed by feed id (§3.12).
+#[tauri::command]
+pub fn get_feed_icons(
+    db_state: State<'_, Mutex<Connection>>,
+) -> Result<std::collections::HashMap<i64, String>, String> {
+    use base64::Engine;
+    let conn = db_state
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let icons = db::list_feed_icons(&conn).map_err(|e| e.to_string())?;
+    Ok(icons
+        .into_iter()
+        .map(|(feed_id, mime, data)| {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(data);
+            (feed_id, format!("data:{mime};base64,{encoded}"))
+        })
+        .collect())
+}
+
 #[tauri::command]
 pub fn list_items(
     db_state: State<'_, Mutex<Connection>>,

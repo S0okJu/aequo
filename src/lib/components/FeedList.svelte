@@ -2,6 +2,7 @@
   import { SvelteSet } from 'svelte/reactivity';
   import Icon from '$lib/icons/Icon.svelte';
   import Spinner from './Spinner.svelte';
+  import FeedIcon from './FeedIcon.svelte';
   import { showToast } from '$lib/toast.svelte.ts';
   import { shortFeedTitle } from '$lib/format';
   import { t } from '$lib/i18n/index.svelte';
@@ -265,6 +266,7 @@
       onclick={() => onSelectFeed(feed.id)}
       oncontextmenu={(event) => openContextMenu({ kind: 'feed', feed }, event)}
     >
+      <FeedIcon {feed} />
       <span class="title">{feedName(feed)}</span>
       {#if feedHasError(feed)}
         <span class="feed-health" role="img" aria-label={feedErrorTooltip(feed)}

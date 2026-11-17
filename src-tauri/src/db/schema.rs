@@ -37,6 +37,17 @@ CREATE TABLE IF NOT EXISTS feed_folders (
     created_at  INTEGER NOT NULL
 );
 
+-- Site icon per feed (docs/UI_SIMPLIFICATION_PLAN.md §3.12). A failed
+-- lookup is stored as mime = '' with empty data so it isn't retried on
+-- every sync, only after fetch::favicon::RETRY_FAILED_AFTER_SECS.
+CREATE TABLE IF NOT EXISTS feed_icons (
+    feed_id     INTEGER PRIMARY KEY REFERENCES feeds(id) ON DELETE CASCADE,
+    mime        TEXT NOT NULL,
+    data        BLOB NOT NULL,
+    source_url  TEXT,
+    fetched_at  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS items (
     id              INTEGER PRIMARY KEY,
     feed_id         INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE,

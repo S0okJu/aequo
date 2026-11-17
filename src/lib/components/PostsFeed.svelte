@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import FeedContent from './FeedContent.svelte';
+  import FeedIcon from './FeedIcon.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import Spinner from './Spinner.svelte';
   import {
@@ -178,9 +179,7 @@
           }}
         >
           <span class="post-header">
-            <!-- Stand-in until feed favicons land (UI8). -->
-            <span class="feed-initial" aria-hidden="true">{feedName.slice(0, 1).toUpperCase()}</span
-            >
+            <FeedIcon {feed} />
             <span class="source">{feedName}</span>
             <span class="separator" aria-hidden="true">·</span>
             <time
@@ -395,19 +394,6 @@
     margin-bottom: var(--space-1);
     color: var(--color-text-tertiary);
     font-size: var(--text-small);
-  }
-
-  .feed-initial {
-    display: grid;
-    flex-shrink: 0;
-    width: 16px;
-    height: 16px;
-    place-items: center;
-    border-radius: var(--radius-xs);
-    background: var(--color-border);
-    color: var(--color-text-secondary);
-    font-size: var(--text-caption);
-    font-weight: var(--weight-bold);
   }
 
   .source {

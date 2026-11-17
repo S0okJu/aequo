@@ -7,6 +7,7 @@
     updateAnnotation,
   } from '$lib/api';
   import FeedContent from './FeedContent.svelte';
+  import FeedIcon from './FeedIcon.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import Spinner from './Spinner.svelte';
   import { formatDateTime, shortFeedTitle, stripSyndicationFooter } from '$lib/format';
@@ -156,6 +157,7 @@
       <header class="reader-header">
         <div class="header-bar">
           <p class="byline">
+            <FeedIcon {feed} />
             <span class="source"
               >{shortFeedTitle(feed?.title, feed?.url ?? t('common.unknownFeed'))}</span
             >

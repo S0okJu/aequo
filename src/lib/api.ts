@@ -52,6 +52,11 @@ export function setFeedRefreshInterval(feedId: number, intervalSecs: number): Pr
   return invoke('set_feed_refresh_interval', { feedId, intervalSecs });
 }
 
+/** Stored feed icons as `data:` URIs keyed by feed id (fetched in the background). */
+export function getFeedIcons(): Promise<Record<number, string>> {
+  return invoke('get_feed_icons');
+}
+
 export type ItemCursor = { publishedAt: number; id: number };
 
 export function listItems(

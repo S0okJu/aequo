@@ -64,7 +64,18 @@ pub fn store_feed(
 }
 
 #[tauri::command]
-pub async fn add_feed(db_state: State<'_, Mutex<Connection>>, url: String) -> Result<i64, String> {
+pub async fn add_feed(
+    db_state: State<'_, Mutex<Connection>>,
+    icon_sync: State<'_, crate::icons::IconSync>,
+    url: String,
+) -> Result<i64, String> {
+    let feed_id = subscribe(&db_state, url).await?;
+    // Fetch the new feed's icon now rather than at the next periodic sync.
+    icon_sync.0.notify_one();
+    Ok(feed_id)
+}
+
+async fn subscribe(db_state: &State<'_, Mutex<Connection>>, url: String) -> Result<i64, String> {
     let bytes = fetch::client::fetch_bytes(&url)
         .await
         .map_err(|e| fetch::client::describe_error(&e))?;
@@ -80,7 +91,7 @@ pub async fn add_feed(db_state: State<'_, Mutex<Connection>>, url: String) -> Re
             fetch::enrichment::enrich_missing_full_content(&mut items, &HashSet::new()).await;
 
             let language = fetch::parser::feed_language(&parsed);
-            let conn = lock_conn(&db_state)?;
+            let conn = lock_conn(db_state)?;
             store_feed(
                 &conn,
                 &url,
@@ -105,7 +116,7 @@ pub async fn add_feed(db_state: State<'_, Mutex<Connection>>, url: String) -> Re
                 fetch::enrichment::enrich_missing_full_content(&mut items, &HashSet::new()).await;
 
                 let language = fetch::parser::feed_language(&parsed);
-                let conn = lock_conn(&db_state)?;
+                let conn = lock_conn(db_state)?;
                 return store_feed(
                     &conn,
                     &discovered.url,
@@ -121,7 +132,7 @@ pub async fn add_feed(db_state: State<'_, Mutex<Connection>>, url: String) -> Re
             fetch::enrichment::enrich_missing_full_content(&mut listing.items, &HashSet::new())
                 .await;
 
-            let conn = lock_conn(&db_state)?;
+            let conn = lock_conn(db_state)?;
             store_feed(
                 &conn,
                 &url,

@@ -581,7 +581,11 @@ Claude Fable 5.2 vs. Fable 5.1: Fewer refusals…
   `onAdded`는 새 피드 id를 넘긴다. 기본 폴더는 보고 있던 폴더(또는 보고 있던 피드의 폴더). 설정 화면의 인라인 폼은 UI11에서 이 다이얼로그로 바뀐다.
 - §3.11. `AddFeedDialog.svelte` + 사이드바 `+`. UI5 이후에 진행한다(`+` 버튼 자리가 UI5에서 생김).
 
-### UI8. Favicon — [ ]
+### UI8. Favicon — [x]
+- 구현 중 결정됨: 후보는 **사이트 루트 HTML의 `<link rel=icon>` → `apple-touch-icon` → `/favicon.ico`** 순이다. 피드 자체의 `<icon>/<logo>`는 기존 구독에도 같은 방식으로 적용하려면
+  피드를 다시 받아야 해서 제외했다(사이트 아이콘이 대부분을 커버). 수집은 스케줄러의 백그라운드 연결을 공유하는 단일 루프(`src-tauri/src/icons.rs`)가
+  시작 시 · 피드 추가 직후(`IconSync` 알림) · 6시간마다 한 피드씩 처리하고, 실패는 `mime=''` 행으로 기록해 7일 뒤 재시도한다. 실패가 기존 아이콘을 덮어쓰지 않는다.
+  프론트는 `feed-icon-updated` 이벤트마다 전체 아이콘 맵을 다시 받는다(아이콘이 작아 단순함을 택함). 설정 화면 적용은 UI11에서.
 - §3.12. 백엔드(스키마, `fetch/favicon.rs`, `get_feed_icons`, 이벤트) → `FeedIcon.svelte` → 각 화면 적용 순서.
 - UI1에서 만든 첫 글자 대체 표시를 `FeedIcon`으로 교체한다.
 
