@@ -1,28 +1,51 @@
 //! Local Codex and Claude Code session management for article discussions.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::Notify;
 
 use crate::db::{self, AiSession};
 
-use super::ai_transcript::{self, TranscriptMessage, TranscriptSnapshot};
+use super::ai_stream::{StreamParser, StreamUpdate};
+use super::ai_transcript::{self, TranscriptSnapshot};
 
-const CLI_TIMEOUT: Duration = Duration::from_secs(300);
+/// Give up when the CLI prints nothing for this long. Measured between
+/// output lines, not over the whole run, so a long answer that keeps
+/// streaming is never cut off.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Cancellation handles for in-flight runs, keyed by request id.
+#[derive(Default)]
+pub struct AiRuns(Mutex<HashMap<String, Arc<Notify>>>);
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AiSendResult {
+pub struct AiStart {
+    pub request_id: String,
     pub session_id: i64,
-    pub provider_session_id: String,
-    pub assistant_message: TranscriptMessage,
+}
+
+/// Payload of the `ai-stream` event. `kind` is `delta` (append `text`),
+/// `replace` (the answer so far is `text`), `status` (`text` is "thinking"
+/// or "tool"), or a terminal `done` / `error` / `cancelled`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiStreamPayload {
+    request_id: String,
+    session_id: i64,
+    kind: &'static str,
+    text: String,
 }
 
 fn now_unix() -> i64 {
@@ -110,7 +133,11 @@ fn build_command(
             command
                 .arg("--print")
                 .arg("--output-format")
-                .arg("json")
+                .arg("stream-json")
+                // stream-json requires --verbose with --print; partial
+                // messages turn on token-level text deltas.
+                .arg("--verbose")
+                .arg("--include-partial-messages")
                 .arg("--permission-prompts")
                 .arg("none")
                 // The reader needs web fetch only; no filesystem or shell tools.
@@ -139,71 +166,6 @@ fn build_command(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     Ok(command)
-}
-
-fn parse_cli_response(
-    provider: &str,
-    output: &str,
-    fallback_session_id: Option<&str>,
-) -> Result<(String, String), String> {
-    if provider == "claude" {
-        let parsed: serde_json::Value = serde_json::from_str(output)
-            .map_err(|_| "Claude Code returned an unreadable response.".to_string())?;
-        if parsed["is_error"].as_bool().unwrap_or(false) {
-            return Err(parsed["result"]
-                .as_str()
-                .unwrap_or("Claude Code could not complete this request.")
-                .to_string());
-        }
-        let message = parsed["result"]
-            .as_str()
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "Claude Code returned an empty response.".to_string())?
-            .to_string();
-        let session_id = parsed["session_id"]
-            .as_str()
-            .or(fallback_session_id)
-            .ok_or_else(|| "Claude Code did not return a session id.".to_string())?
-            .to_string();
-        return Ok((session_id, message));
-    }
-
-    let mut session_id = fallback_session_id.map(str::to_string);
-    let mut assistant_message = None;
-    for line in output.lines().filter(|line| !line.trim().is_empty()) {
-        let Ok(event) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        match event["type"].as_str().unwrap_or_default() {
-            "thread.started" => {
-                session_id = event["thread_id"]
-                    .as_str()
-                    .map(str::to_string)
-                    .or(session_id);
-            }
-            "item.completed" => {
-                let item = &event["item"];
-                let item_type = item["type"].as_str().unwrap_or_default();
-                if (item_type == "agent_message" || item_type == "assistant_message")
-                    && let Some(text) = item["text"].as_str()
-                {
-                    assistant_message = Some(text.to_string());
-                }
-            }
-            "error" | "turn.failed" => {
-                if let Some(message) = event["message"].as_str() {
-                    return Err(message.to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let session_id = session_id.ok_or_else(|| "Codex did not return a session id.".to_string())?;
-    let assistant_message = assistant_message
-        .filter(|message| !message.trim().is_empty())
-        .ok_or_else(|| "Codex returned an empty response.".to_string())?;
-    Ok((session_id, assistant_message))
 }
 
 fn prepare_session(
@@ -316,15 +278,20 @@ pub fn delete_ai_session(
     }
 }
 
+/// Starts a CLI run for a message and returns at once; the answer streams
+/// to the frontend as `ai-stream` events tagged with the returned request
+/// id. The run keeps going (and its session is kept) if the user moves to
+/// another post meanwhile.
 #[tauri::command]
-pub async fn send_ai_message(
+pub fn start_ai_message(
     app: AppHandle,
     db_state: State<'_, std::sync::Mutex<Connection>>,
+    runs: State<'_, AiRuns>,
     item_id: i64,
     provider: String,
     session_id: Option<i64>,
     prompt: String,
-) -> Result<AiSendResult, String> {
+) -> Result<AiStart, String> {
     validate_provider(&provider)?;
     if prompt.trim().is_empty() {
         return Err("message cannot be empty".to_string());
@@ -353,41 +320,152 @@ pub async fn send_ai_message(
         &prompt,
         &working_directory,
     )?;
-    let output = tokio::time::timeout(CLI_TIMEOUT, command.output())
-        .await
-        .map_err(|_| "AI session timed out after five minutes".to_string())?
+    let child = command
+        .spawn()
         .map_err(|error| format!("could not start the {provider} CLI: {error}"))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let detail = if stderr.is_empty() {
-            format!("{provider} CLI exited with status {}", output.status)
-        } else {
-            stderr
-        };
-        return Err(detail);
+    let request_id = generate_uuid()?;
+    let cancel = Arc::new(Notify::new());
+    runs.0
+        .lock()
+        .map_err(|_| "AI run registry poisoned".to_string())?
+        .insert(request_id.clone(), cancel.clone());
+
+    tauri::async_runtime::spawn(stream_run(
+        app.clone(),
+        request_id.clone(),
+        session.id,
+        provider,
+        child,
+        cancel,
+    ));
+
+    Ok(AiStart {
+        request_id,
+        session_id: session.id,
+    })
+}
+
+/// Stops an in-flight run; the answer streamed so far is kept and the run
+/// ends with a `cancelled` event. Unknown or finished ids are ignored.
+#[tauri::command]
+pub fn cancel_ai_message(runs: State<'_, AiRuns>, request_id: String) -> Result<(), String> {
+    if let Some(cancel) = runs
+        .0
+        .lock()
+        .map_err(|_| "AI run registry poisoned".to_string())?
+        .get(&request_id)
+    {
+        cancel.notify_one();
+    }
+    Ok(())
+}
+
+enum RunEnd {
+    Done(String),
+    Error(String),
+    Cancelled,
+}
+
+async fn stream_run(
+    app: AppHandle,
+    request_id: String,
+    session_id: i64,
+    provider: String,
+    mut child: tokio::process::Child,
+    cancel: Arc<Notify>,
+) {
+    let emit = |kind: &'static str, text: String| {
+        let _ = app.emit(
+            "ai-stream",
+            AiStreamPayload {
+                request_id: request_id.clone(),
+                session_id,
+                kind,
+                text,
+            },
+        );
+    };
+
+    let mut parser = StreamParser::new(&provider);
+    let mut provider_session_id = None;
+    let mut end = None;
+
+    let stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    if let Some(stdout) = stdout {
+        let mut lines = BufReader::new(stdout).lines();
+        while end.is_none() {
+            let line = tokio::select! {
+                _ = cancel.notified() => { end = Some(RunEnd::Cancelled); break; }
+                line = tokio::time::timeout(IDLE_TIMEOUT, lines.next_line()) => line,
+            };
+            let line = match line {
+                Err(_) => {
+                    end = Some(RunEnd::Error(format!(
+                        "The {provider} CLI stopped responding for {} seconds.",
+                        IDLE_TIMEOUT.as_secs()
+                    )));
+                    break;
+                }
+                Ok(Ok(Some(line))) => line,
+                Ok(Ok(None)) | Ok(Err(_)) => break,
+            };
+            for update in parser.feed_line(&line) {
+                match update {
+                    StreamUpdate::Delta(text) => emit("delta", text),
+                    StreamUpdate::Replace(text) => emit("replace", text),
+                    StreamUpdate::Status(step) => emit("status", step.to_string()),
+                    StreamUpdate::Session(id) => provider_session_id = Some(id),
+                    StreamUpdate::Done(text) => end = Some(RunEnd::Done(text)),
+                    StreamUpdate::Error(message) => end = Some(RunEnd::Error(message)),
+                }
+            }
+        }
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let (provider_session_id, assistant_text) =
-        parse_cli_response(&provider, &stdout, external_session_id.as_deref())?;
+    if matches!(end, Some(RunEnd::Cancelled) | Some(RunEnd::Error(_))) {
+        let _ = child.kill().await;
+    }
+    let status = child.wait().await.ok();
+    let end = match end {
+        Some(end) => end,
+        // Output ended without a result event: report the CLI's own error.
+        None => {
+            let mut detail = String::new();
+            if let Some(stderr) = stderr.as_mut() {
+                let _ = stderr.read_to_string(&mut detail).await;
+            }
+            let detail = detail.trim().to_string();
+            if detail.is_empty() {
+                match status {
+                    Some(status) if !status.success() => {
+                        RunEnd::Error(format!("{provider} CLI exited with status {status}"))
+                    }
+                    _ => RunEnd::Error(format!("The {provider} CLI returned an empty response.")),
+                }
+            } else {
+                RunEnd::Error(detail)
+            }
+        }
+    };
 
-    let conn = db_state
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let now = now_unix();
-    db::update_ai_session_provider_id(&conn, session.id, &provider_session_id, now)
-        .map_err(|error| error.to_string())?;
+    // Remember the provider's session id even for a stopped run, so the
+    // conversation can be continued.
+    if let Some(provider_session_id) = &provider_session_id
+        && let Ok(conn) = app.state::<std::sync::Mutex<Connection>>().lock()
+    {
+        let _ =
+            db::update_ai_session_provider_id(&conn, session_id, provider_session_id, now_unix());
+    }
 
-    Ok(AiSendResult {
-        session_id: session.id,
-        provider_session_id,
-        assistant_message: TranscriptMessage {
-            id: now,
-            session_id: session.id,
-            role: "assistant".to_string(),
-            content: assistant_text,
-            created_at: now,
-        },
-    })
+    match end {
+        RunEnd::Done(text) => emit("done", text),
+        RunEnd::Error(message) => emit("error", message),
+        RunEnd::Cancelled => emit("cancelled", parser.text().to_string()),
+    }
+
+    if let Ok(mut runs) = app.state::<AiRuns>().0.lock() {
+        runs.remove(&request_id);
+    }
 }

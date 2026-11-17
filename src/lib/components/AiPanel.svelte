@@ -1,36 +1,90 @@
 <script lang="ts">
-  import { deleteAiSession, listAiSessions, loadAiTranscript, sendAiMessage } from '$lib/api';
+  import { onMount, tick } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
+  import {
+    cancelAiMessage,
+    deleteAiSession,
+    listAiSessions,
+    loadAiTranscript,
+    startAiMessage,
+  } from '$lib/api';
   import Icon from '$lib/icons/Icon.svelte';
-  import type { AiMessage, AiProvider, AiSession, Item } from '$lib/types';
+  import { formatRelative } from '$lib/format';
+  import { t } from '$lib/i18n/index.svelte';
+  import { renderMarkdown } from '$lib/markdown';
+  import type { AiMessage, AiProvider, AiSession, AiStreamEvent, Item } from '$lib/types';
 
   interface Props {
     item: Item | null;
+    /** The post's feed language tag (e.g. "ko"), if the feed declares one. */
+    language?: string | null;
     onCollapse: () => void;
     pendingQuote?: string | null;
     onConsumedPendingQuote?: () => void;
   }
 
-  let { item, onCollapse, pendingQuote = null, onConsumedPendingQuote }: Props = $props();
+  let {
+    item,
+    language = null,
+    onCollapse,
+    pendingQuote = null,
+    onConsumedPendingQuote,
+  }: Props = $props();
 
-  let provider = $state<AiProvider>('codex');
-  let activeTab = $state<'chat' | 'history'>('chat');
+  const PROVIDER_KEY = 'aequo:aiProvider';
+  const PROVIDER_NAMES: Record<AiProvider, string> = { codex: 'Codex', claude: 'Claude Code' };
+
+  function readStoredProvider(): AiProvider {
+    try {
+      return localStorage.getItem(PROVIDER_KEY) === 'claude' ? 'claude' : 'codex';
+    } catch {
+      return 'codex';
+    }
+  }
+
+  /** The in-flight answer for the open post (one at a time per panel). */
+  interface Run {
+    requestId: string | null;
+    postId: number;
+    prompt: string;
+    text: string;
+    status: string | null;
+  }
+
+  let provider = $state<AiProvider>(readStoredProvider());
   let sessions = $state<AiSession[]>([]);
   let messages = $state<AiMessage[]>([]);
   let selectedSessionId = $state<number | null>(null);
   let draft = $state('');
-  let sending = $state(false);
-  let loadingSessions = $state(false);
+  let quote = $state<string | null>(null);
+  let run = $state<Run | null>(null);
   let loadingMessages = $state(false);
   let error = $state<string | null>(null);
+  let notice = $state<string | null>(null);
   let transcriptNote = $state<string | null>(null);
   let lastPrompt = $state('');
-  let pendingPrompt = $state('');
   let copiedMessageId = $state<number | null>(null);
+  let historyOpen = $state(false);
   let confirmingRemoveId = $state<number | null>(null);
+  // Set after switching provider mid-conversation: lets the user jump back.
+  let previousConversation = $state<{ provider: AiProvider; sessionId: number } | null>(null);
   let messageList = $state<HTMLDivElement | undefined>(undefined);
   let composerEl = $state<HTMLTextAreaElement | undefined>(undefined);
-  let loadGeneration = 0;
   let contextGeneration = 0;
+  let loadGeneration = 0;
+
+  // Streaming text is collected outside reactive state and flushed once per
+  // animation frame, so a fast stream re-renders the Markdown at most ~60x/s.
+  let streamBuffer = '';
+  let flushScheduled = false;
+  // Events can arrive before start_ai_message has returned the request id.
+  let earlyEvents: AiStreamEvent[] = [];
+  let stickToBottom = true;
+
+  const sending = $derived(run !== null && run.postId === item?.id);
+  const isEmptyChat = $derived(
+    !selectedSessionId && messages.length === 0 && !sending && !loadingMessages,
+  );
 
   async function loadAllSessions(postId: number): Promise<AiSession[]> {
     const [codexSessions, claudeSessions] = await Promise.all([
@@ -42,72 +96,175 @@
     );
   }
 
+  // A different post starts from an empty chat. A run still streaming for
+  // the previous post keeps going in the backend and lands in that post's
+  // history; this panel just stops showing it.
   $effect(() => {
     const postId = item?.id;
     const generation = ++contextGeneration;
-    let cancelled = false;
     loadGeneration += 1;
-    sending = false;
-    pendingPrompt = '';
+    run = null;
     selectedSessionId = null;
     messages = [];
     sessions = [];
     error = null;
+    notice = null;
     transcriptNote = null;
-
+    historyOpen = false;
+    previousConversation = null;
     if (postId === undefined) return;
-    loadingSessions = true;
     loadAllSessions(postId)
       .then((result) => {
-        if (!cancelled && generation === contextGeneration) sessions = result;
+        if (generation === contextGeneration) sessions = result;
       })
       .catch((reason) => {
-        if (!cancelled && generation === contextGeneration) error = String(reason);
-      })
-      .finally(() => {
-        if (!cancelled && generation === contextGeneration) loadingSessions = false;
+        if (generation === contextGeneration) error = String(reason);
       });
-
-    return () => {
-      cancelled = true;
-    };
   });
 
-  $effect(() => {
-    if (messages.length >= 0 && messageList) {
-      queueMicrotask(() => {
-        if (messageList) messageList.scrollTop = messageList.scrollHeight;
-      });
-    }
-  });
-
-  // "Ask AI about selection" (docs/READER_ANNOTATIONS_PLAN.md §4.3): a quote
-  // selected in the reader always starts a brand-new session here, never
-  // appends to whatever session happens to be open. `pendingQuote` is a
-  // one-shot value - consumed exactly once via onConsumedPendingQuote so
-  // reopening/toggling the panel afterward doesn't re-trigger the prefill.
+  // "Ask AI about selection" (docs/READER_ANNOTATIONS_PLAN.md §4.3) always
+  // starts a new conversation with the selection as a quote chip.
   $effect(() => {
     if (!pendingQuote) return;
-    const quote = pendingQuote;
+    const selected = pendingQuote;
     startNewChat();
-    draft = `> ${quote}\n\n`;
+    quote = selected;
     queueMicrotask(() => composerEl?.focus());
     onConsumedPendingQuote?.();
   });
 
-  function selectProvider(next: AiProvider) {
-    if (provider === next) return;
-    provider = next;
-    startNewChat();
+  onMount(() => {
+    composerEl?.focus();
+    const unlisten = listen<AiStreamEvent>('ai-stream', (event) =>
+      handleStreamEvent(event.payload),
+    );
+    return () => {
+      unlisten.then((stop) => stop());
+    };
+  });
+
+  function scrollToEnd(force = false) {
+    if (!messageList || (!force && !stickToBottom)) return;
+    tick().then(() => {
+      if (messageList) messageList.scrollTop = messageList.scrollHeight;
+    });
+  }
+
+  function handleScroll() {
+    if (!messageList) return;
+    const { scrollTop, clientHeight, scrollHeight } = messageList;
+    stickToBottom = scrollHeight - scrollTop - clientHeight < 48;
+  }
+
+  function flushStream() {
+    flushScheduled = false;
+    if (run) run.text = streamBuffer;
+    scrollToEnd();
+  }
+
+  function handleStreamEvent(event: AiStreamEvent) {
+    if (!run) return;
+    if (run.requestId === null) {
+      earlyEvents.push(event);
+      return;
+    }
+    if (event.requestId !== run.requestId) return;
+    switch (event.kind) {
+      case 'delta':
+        streamBuffer += event.text;
+        if (!flushScheduled) {
+          flushScheduled = true;
+          requestAnimationFrame(flushStream);
+        }
+        break;
+      case 'replace':
+        streamBuffer = event.text;
+        flushStream();
+        break;
+      case 'status':
+        run.status = event.text;
+        break;
+      default:
+        finishRun(event);
+    }
+  }
+
+  async function finishRun(event: AiStreamEvent) {
+    const finished = run;
+    if (!finished) return;
+    const finalText = event.kind === 'done' ? event.text || streamBuffer : streamBuffer;
+    run = null;
+    streamBuffer = '';
+    const postId = finished.postId;
+    const generation = contextGeneration;
+    selectedSessionId = event.sessionId;
+
+    const localTurn: AiMessage[] = [
+      localMessage('user', finished.prompt, event.sessionId),
+      ...(finalText ? [localMessage('assistant', finalText, event.sessionId)] : []),
+    ];
+
+    if (event.kind === 'error') {
+      error = event.text;
+      messages = [...messages, localTurn[0]];
+    } else if (event.kind === 'cancelled') {
+      // The CLI transcript won't have a stopped answer; keep what streamed.
+      notice = t('ai.stopped');
+      messages = [...messages, ...localTurn];
+    } else {
+      try {
+        const transcript = await loadAiTranscript(event.sessionId);
+        if (generation !== contextGeneration) return;
+        transcriptNote = transcript.note;
+        messages =
+          transcript.messages.length > 0 ? transcript.messages : [...messages, ...localTurn];
+      } catch {
+        if (generation === contextGeneration) messages = [...messages, ...localTurn];
+      }
+    }
+    scrollToEnd(true);
+    try {
+      const updated = await loadAllSessions(postId);
+      if (generation === contextGeneration) sessions = updated;
+    } catch {
+      // History refresh is best-effort; the conversation itself is shown.
+    }
+  }
+
+  function localMessage(role: 'user' | 'assistant', content: string, sessionId: number): AiMessage {
+    return {
+      id: Date.now() + (role === 'user' ? 0 : 1),
+      sessionId,
+      role,
+      content,
+      createdAt: Math.floor(Date.now() / 1000),
+    };
   }
 
   function startNewChat() {
     selectedSessionId = null;
     messages = [];
     error = null;
+    notice = null;
     lastPrompt = '';
     transcriptNote = null;
-    activeTab = 'chat';
+    historyOpen = false;
+  }
+
+  function selectProvider(next: AiProvider) {
+    if (provider === next || sending) return;
+    // A conversation belongs to one CLI, so switching starts a new one; the
+    // old one stays in history and one click brings it back (§3.9).
+    if (selectedSessionId !== null) {
+      previousConversation = { provider, sessionId: selectedSessionId };
+    }
+    provider = next;
+    try {
+      localStorage.setItem(PROVIDER_KEY, next);
+    } catch {
+      // The choice still applies for this session.
+    }
+    startNewChat();
   }
 
   async function openSession(session: AiSession) {
@@ -115,16 +272,19 @@
     const generation = ++loadGeneration;
     selectedSessionId = session.id;
     provider = session.provider;
-    activeTab = 'chat';
+    previousConversation = null;
+    historyOpen = false;
     loadingMessages = true;
     messages = [];
     transcriptNote = null;
     error = null;
+    notice = null;
     try {
       const result = await loadAiTranscript(session.id);
       if (generation === loadGeneration) {
         messages = result.messages;
         transcriptNote = result.note;
+        scrollToEnd(true);
       }
     } catch (reason) {
       if (generation === loadGeneration) error = String(reason);
@@ -133,18 +293,9 @@
     }
   }
 
-  async function reloadSessions() {
-    if (!item) return;
-    sessions = await loadAllSessions(item.id);
-  }
-
-  function requestRemoveSession(session: AiSession) {
-    if (sending) return;
-    confirmingRemoveId = session.id;
-  }
-
-  function cancelRemoveSession() {
-    confirmingRemoveId = null;
+  function goBackToPrevious() {
+    const target = sessions.find((session) => session.id === previousConversation?.sessionId);
+    if (target) openSession(target);
   }
 
   async function removeSession(session: AiSession) {
@@ -153,92 +304,69 @@
       await deleteAiSession(session.id);
       if (selectedSessionId === session.id) startNewChat();
       confirmingRemoveId = null;
-      await reloadSessions();
+      if (item) sessions = await loadAllSessions(item.id);
     } catch (reason) {
       error = String(reason);
     }
   }
 
-  async function submitMessage(prompt = draft.trim()) {
-    if (!item || !prompt || sending) return;
-    const postId = item.id;
-    const currentProvider = provider;
-    const currentSessionId = selectedSessionId;
-    const generation = contextGeneration;
-    sending = true;
-    error = null;
-    draft = '';
-    lastPrompt = prompt;
-    pendingPrompt = prompt;
-
-    try {
-      const result = await sendAiMessage(postId, currentProvider, currentSessionId, prompt);
-      if (generation !== contextGeneration) return;
-      selectedSessionId = result.sessionId;
-      const transcript = await loadAiTranscript(result.sessionId);
-      if (generation !== contextGeneration) return;
-      transcriptNote = transcript.note;
-      if (transcript.messages.length > 0) {
-        messages = transcript.messages;
-      } else {
-        const userMessage: AiMessage = {
-          id: Date.now(),
-          sessionId: result.sessionId,
-          role: 'user',
-          content: prompt,
-          createdAt: Math.floor(Date.now() / 1000),
-        };
-        messages = [...messages, userMessage, result.assistantMessage];
-      }
-      sessions = await loadAllSessions(postId);
-    } catch (reason) {
-      if (generation !== contextGeneration) return;
-      error = String(reason);
-      try {
-        const updatedSessions = await loadAllSessions(postId);
-        if (generation !== contextGeneration) return;
-        sessions = updatedSessions;
-        const providerSessions = updatedSessions.filter(
-          (session) => session.provider === currentProvider,
-        );
-        if (currentSessionId === null && providerSessions.length > 0) {
-          const newest = providerSessions[0];
-          selectedSessionId = newest.id;
-          const transcript = await loadAiTranscript(newest.id);
-          messages = transcript.messages;
-          transcriptNote = transcript.note;
-        } else if (currentSessionId !== null) {
-          const transcript = await loadAiTranscript(currentSessionId);
-          messages = transcript.messages;
-          transcriptNote = transcript.note;
-        }
-      } catch {
-        // Keep the command error visible when history refresh also fails.
-      }
-    } finally {
-      if (generation === contextGeneration) {
-        sending = false;
-        pendingPrompt = '';
-      }
-    }
+  // The answer's language follows the article (§3.15): the feed's declared
+  // language when known, otherwise whatever the article is written in.
+  function languageDirective(): string {
+    return language
+      ? `Respond in the language with BCP 47 tag "${language}".`
+      : 'Respond in the same language the article is written in.';
   }
 
-  function summarizePost() {
-    if (!item?.link) return;
-    const title = item.title?.trim();
-    const prompt = `Summarize it. Give me the main idea and key points.\n\n${title ? `Title: ${title}\n` : ''}Post URL: ${item.link}`;
-    submitMessage(prompt);
-  }
-
-  function askAboutPost(question: string) {
-    if (!item) return;
-    const context = [
-      item.title ? `Title: ${item.title}` : '',
-      item.link ? `Post URL: ${item.link}` : '',
-    ]
+  function postContext(): string {
+    if (!item) return '';
+    return [item.title ? `Title: ${item.title}` : '', item.link ? `Post URL: ${item.link}` : '']
       .filter(Boolean)
       .join('\n');
-    submitMessage(context ? `${question}\n\n${context}` : question);
+  }
+
+  function askChip(question: string) {
+    submitMessage(`${question} ${languageDirective()}\n\n${postContext()}`);
+  }
+
+  async function submitMessage(text = draft.trim()) {
+    if (!item || sending) return;
+    const quoted = quote;
+    if (!text && !quoted) return;
+    const prompt = [quoted ? quoted.replace(/^/gm, '> ') : '', text].filter(Boolean).join('\n\n');
+    const postId = item.id;
+    const generation = contextGeneration;
+
+    run = { requestId: null, postId, prompt, text: '', status: null };
+    streamBuffer = '';
+    earlyEvents = [];
+    draft = '';
+    quote = null;
+    error = null;
+    notice = null;
+    lastPrompt = prompt;
+    previousConversation = null;
+    stickToBottom = true;
+    scrollToEnd(true);
+    if (composerEl) composerEl.style.height = '';
+
+    try {
+      const started = await startAiMessage(postId, provider, selectedSessionId, prompt);
+      if (generation !== contextGeneration || !run || run.postId !== postId) return;
+      run.requestId = started.requestId;
+      selectedSessionId = started.sessionId;
+      const queued = earlyEvents;
+      earlyEvents = [];
+      for (const event of queued) handleStreamEvent(event);
+    } catch (reason) {
+      if (generation !== contextGeneration) return;
+      run = null;
+      error = String(reason);
+    }
+  }
+
+  function stopRun() {
+    if (run?.requestId) cancelAiMessage(run.requestId);
   }
 
   function resizeComposer(event: Event) {
@@ -255,414 +383,300 @@
         if (copiedMessageId === message.id) copiedMessageId = null;
       }, 1400);
     } catch {
-      error = 'Could not copy this response. Please select and copy the text instead.';
+      error = t('ai.copyFailed');
     }
   }
 
-  function formatTime(timestamp: number): string {
-    return new Date(timestamp * 1000).toLocaleString(undefined, {
-      dateStyle: 'short',
-      timeStyle: 'short',
-    });
-  }
-
-  function escapeHtml(value: string): string {
-    return value.replace(/[&<>"']/g, (char) => {
-      const entities: Record<string, string> = {
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;',
-      };
-      return entities[char];
-    });
-  }
-
-  function inlineMarkdown(value: string): string {
-    let safe = escapeHtml(value);
-    safe = safe.replace(/`([^`]+)`/g, '<code>$1</code>');
-    safe = safe.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    safe = safe.replace(/__([^_]+)__/g, '<strong>$1</strong>');
-    safe = safe.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    safe = safe.replace(/_([^_]+)_/g, '<em>$1</em>');
-    safe = safe.replace(
-      /(^|\s)(https?:\/\/[^\s<]+)/g,
-      '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>',
-    );
-    safe = safe.replace(
-      /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-      (_match, label: string, url: string) =>
-        `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`,
-    );
-    return safe;
-  }
-
-  function renderMarkdown(markdown: string): string {
-    const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
-    const blocks: string[] = [];
-    let paragraph: string[] = [];
-    let list: string[] = [];
-    let listKind: 'ul' | 'ol' | null = null;
-    let code: string[] = [];
-    let inCode = false;
-
-    const flushParagraph = () => {
-      if (paragraph.length) blocks.push(`<p>${paragraph.map(inlineMarkdown).join('<br>')}</p>`);
-      paragraph = [];
-    };
-    const flushList = () => {
-      if (listKind && list.length)
-        blocks.push(
-          `<${listKind}>${list.map((item) => `<li>${inlineMarkdown(item)}</li>`).join('')}</${listKind}>`,
-        );
-      list = [];
-      listKind = null;
-    };
-
-    for (const line of lines) {
-      if (/^\s*```/.test(line)) {
-        flushParagraph();
-        flushList();
-        if (inCode) {
-          blocks.push(`<pre><code>${escapeHtml(code.join('\n'))}</code></pre>`);
-          code = [];
-          inCode = false;
-        } else {
-          inCode = true;
-        }
-        continue;
-      }
-      if (inCode) {
-        code.push(line);
-        continue;
-      }
-      if (!line.trim()) {
-        flushParagraph();
-        flushList();
-        continue;
-      }
-
-      const heading = line.match(/^\s{0,3}(#{1,4})\s+(.+)$/);
-      if (heading) {
-        flushParagraph();
-        flushList();
-        const level = heading[1].length;
-        blocks.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
-        continue;
-      }
-
-      const bullet = line.match(/^\s*[-*+]\s+(.+)$/);
-      const numbered = line.match(/^\s*\d+[.)]\s+(.+)$/);
-      const item = bullet?.[1] ?? numbered?.[1];
-      const kind = bullet ? 'ul' : numbered ? 'ol' : null;
-      if (item && kind) {
-        flushParagraph();
-        if (listKind && listKind !== kind) flushList();
-        listKind = kind;
-        list.push(item);
-        continue;
-      }
-
-      flushList();
-      paragraph.push(line);
+  function clickOutside(node: HTMLElement, onOutside: () => void) {
+    function handle(event: MouseEvent) {
+      if (!node.contains(event.target as Node)) onOutside();
     }
-
-    if (inCode) blocks.push(`<pre><code>${escapeHtml(code.join('\n'))}</code></pre>`);
-    flushParagraph();
-    flushList();
-    return blocks.join('');
+    document.addEventListener('mousedown', handle, true);
+    return {
+      destroy() {
+        document.removeEventListener('mousedown', handle, true);
+      },
+    };
   }
 </script>
 
-<aside class="ai-panel" aria-label="AI assistant">
+<aside class="ai-panel" aria-label={t('ai.panel')}>
   <header class="panel-header">
-    <div class="panel-title">
-      <span class="spark"><Icon name="ask-ai" size={14} /></span>
-      <h2>AI assistant</h2>
-      <span class="local-status"><i></i> Local</span>
+    <select
+      class="provider"
+      aria-label={t('ai.provider')}
+      value={provider}
+      disabled={sending}
+      onchange={(event) => selectProvider(event.currentTarget.value as AiProvider)}
+    >
+      <option value="codex">{PROVIDER_NAMES.codex}</option>
+      <option value="claude">{PROVIDER_NAMES.claude}</option>
+    </select>
+    <div class="header-actions">
+      <div class="history-anchor">
+        <button
+          class="icon-button"
+          type="button"
+          aria-label={t('ai.history')}
+          title={t('ai.history')}
+          aria-haspopup="dialog"
+          aria-expanded={historyOpen}
+          disabled={!item}
+          onclick={() => (historyOpen = !historyOpen)}><Icon name="clock" size={15} /></button
+        >
+        {#if historyOpen}
+          <div
+            class="history-popover"
+            role="dialog"
+            aria-label={t('ai.history')}
+            use:clickOutside={() => (historyOpen = false)}
+          >
+            {#if sessions.length === 0}
+              <p class="history-empty">{t('ai.historyEmpty')}</p>
+            {:else}
+              <ul>
+                {#each sessions as session (session.id)}
+                  <li class:current={selectedSessionId === session.id}>
+                    {#if confirmingRemoveId === session.id}
+                      <div class="confirm-row">
+                        <span>{t('ai.historyNote')}</span>
+                        <div class="confirm-actions">
+                          <button type="button" onclick={() => (confirmingRemoveId = null)}
+                            >{t('common.cancel')}</button
+                          >
+                          <button
+                            type="button"
+                            class="confirm-remove"
+                            onclick={() => removeSession(session)}>{t('ai.remove')}</button
+                          >
+                        </div>
+                      </div>
+                    {:else}
+                      <button
+                        class="history-open"
+                        type="button"
+                        disabled={sending}
+                        onclick={() => openSession(session)}
+                      >
+                        <span class="history-title">{session.title}</span>
+                        <span class="history-meta"
+                          >{PROVIDER_NAMES[session.provider]} · {formatRelative(
+                            session.updatedAt,
+                          )}</span
+                        >
+                      </button>
+                      <button
+                        class="icon-button small"
+                        type="button"
+                        aria-label={t('ai.removeConversation')}
+                        title={t('ai.removeConversation')}
+                        disabled={sending}
+                        onclick={() => (confirmingRemoveId = session.id)}
+                        ><Icon name="close" size={12} /></button
+                      >
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+        {/if}
+      </div>
       <button
-        class="collapse-panel"
+        class="icon-button"
         type="button"
-        aria-label="Collapse AI panel"
-        title="Collapse AI panel"
-        onclick={onCollapse}><Icon name="chevron-right" size={14} /></button
+        aria-label={t('ai.newChat')}
+        title={t('ai.newChat')}
+        disabled={!item || sending || isEmptyChat}
+        onclick={startNewChat}><Icon name="edit" size={15} /></button
       >
-    </div>
-    <div class="tabs" role="tablist" aria-label="AI panel view">
       <button
+        class="icon-button"
         type="button"
-        role="tab"
-        aria-selected={activeTab === 'chat'}
-        class:active={activeTab === 'chat'}
-        onclick={() => (activeTab = 'chat')}>Chat</button
-      >
-      <button
-        type="button"
-        role="tab"
-        aria-selected={activeTab === 'history'}
-        class:active={activeTab === 'history'}
-        disabled={!item}
-        onclick={() => (activeTab = 'history')}>History</button
+        aria-label={t('ai.close')}
+        title={t('ai.close')}
+        onclick={onCollapse}><Icon name="close" size={15} /></button
       >
     </div>
   </header>
 
-  {#if activeTab === 'chat'}
-    <div class="provider-row">
-      <span class="provider-label">ASSISTANT</span>
-    </div>
-    <div class="provider-picker" aria-label="AI provider">
-      <button
-        type="button"
-        class:active={provider === 'codex'}
-        aria-pressed={provider === 'codex'}
-        disabled={sending}
-        onclick={() => selectProvider('codex')}>Codex</button
-      >
-      <button
-        type="button"
-        class:active={provider === 'claude'}
-        aria-pressed={provider === 'claude'}
-        disabled={sending}
-        onclick={() => selectProvider('claude')}>Claude</button
-      >
-      <button class="new-chat" type="button" disabled={!item || sending} onclick={startNewChat}>
-        New chat
-      </button>
-    </div>
-  {/if}
-
-  {#if activeTab === 'chat'}
-    {#if item}
-      <div class="post-context" title={item.title ?? ''}>
-        <div class="context-copy">
-          <span class="context-label">DISCUSSING</span>
-          <span class="context-title">{item.title ?? '(untitled)'}</span>
-        </div>
-        {#if item.link}
-          <!-- eslint-disable svelte/no-navigation-without-resolve -->
-          <a
-            class="context-link"
-            href={item.link}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Open original post"><Icon name="external-link" size={13} /></a
-          >
-          <!-- eslint-enable svelte/no-navigation-without-resolve -->
-        {/if}
-        <span class="conversation-state">{selectedSessionId ? 'Continuing' : 'New chat'}</span>
-      </div>
-
-      <div class="chat-messages" bind:this={messageList}>
-        {#if !selectedSessionId && messages.length === 0}
-          <div class="chat-empty">
-            <div class="empty-icon"><Icon name="ask-ai" size={22} /></div>
-            <h3>What would you like to know?</h3>
-            <p>Ask a question about this post or choose a quick start.</p>
-            <button
-              class="summarize"
-              type="button"
-              disabled={!item.link || sending}
-              onclick={summarizePost}
-            >
-              <Icon name="ask-ai" size={13} />
-              Summarize
-            </button>
-            {#if !item.link}<p class="hint">This post has no original URL.</p>{/if}
-            <div class="suggestions" aria-label="Suggested questions">
-              <button
-                type="button"
-                disabled={sending}
-                onclick={() => askAboutPost('What are the key takeaways?')}>Key takeaways</button
-              >
-              <button
-                type="button"
-                disabled={sending}
-                onclick={() => askAboutPost('Explain this in simple terms.')}>Explain simply</button
-              >
-              <button
-                type="button"
-                disabled={sending}
-                onclick={() => askAboutPost('What questions should I ask about this?')}
-                >Explore further</button
-              >
-            </div>
-          </div>
-        {:else if loadingMessages}
-          <p class="subtle">Loading conversation…</p>
-        {:else if selectedSessionId && messages.length === 0}
-          <p class="transcript-empty" role="status">
-            {transcriptNote ??
-              'No prior messages are available in the local CLI transcript. You can still continue this session.'}
-          </p>
-        {/if}
-
-        {#if sending && pendingPrompt}
-          <div class="message user pending-user">
-            <span class="message-role">You</span>
-            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-            <div class="message-content">{@html renderMarkdown(pendingPrompt)}</div>
-          </div>
-        {/if}
-        {#each messages as message (message.id)}
-          <div class="message" class:user={message.role === 'user'}>
-            <span class="message-role"
-              >{message.role === 'user' ? 'You' : provider === 'codex' ? 'Codex' : 'Claude'}</span
-            >
-            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-            <div class="message-content">{@html renderMarkdown(message.content)}</div>
-            {#if message.role === 'assistant'}
-              <button
-                class="copy-response"
-                type="button"
-                onclick={() => copyMessage(message)}
-                aria-label="Copy response"
-              >
-                {copiedMessageId === message.id ? 'Copied' : 'Copy'}
-              </button>
-            {/if}
-          </div>
-        {/each}
-        {#if transcriptNote && selectedSessionId && messages.length > 0}
-          <p class="transcript-note" role="status">{transcriptNote}</p>
-        {/if}
-        {#if sending}
-          <div class="message assistant pending">
-            <span class="message-role">{provider === 'codex' ? 'Codex' : 'Claude'}</span>
-            <div class="thinking">
-              <span></span><span></span><span></span> Working on your post…
-            </div>
-          </div>
-        {/if}
-      </div>
-
-      <form
-        class="composer"
-        onsubmit={(event) => {
-          event.preventDefault();
-          submitMessage();
-        }}
-      >
-        <textarea
-          bind:value={draft}
-          bind:this={composerEl}
-          aria-label="Message the AI assistant"
-          placeholder="Write a question about this post…"
-          disabled={sending}
-          oninput={resizeComposer}
-          onkeydown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault();
-              submitMessage();
-            }
-          }}></textarea>
-        <div class="composer-footer">
-          <span
-            >{sending
-              ? 'Response usually takes a moment'
-              : 'Enter to send · Shift+Enter for a new line'}</span
-          >
-          <button type="submit" disabled={!draft.trim() || sending} aria-label="Send message">
-            {#if sending}…{:else}<Icon name="send" size={14} />{/if}
-          </button>
-        </div>
-      </form>
-    {:else}
-      <div class="empty-placeholder">
-        <span class="empty-placeholder-icon"><Icon name="ask-ai" size={20} /></span>
-        <p>Select a post to start a conversation about it.</p>
-      </div>
+  <div class="chat-messages" bind:this={messageList} onscroll={handleScroll}>
+    {#if previousConversation}
+      <p class="switch-note">
+        {t('ai.switchedProvider', { provider: PROVIDER_NAMES[previousConversation.provider] })}
+        · <button type="button" onclick={goBackToPrevious}>{t('ai.backToConversation')}</button>
+      </p>
     {/if}
-  {:else if item}
-    <div class="history-heading">
-      <div>
-        <h3>Conversation history</h3>
-        <p>Codex and Claude sessions for this post</p>
+
+    {#if isEmptyChat}
+      <div class="chat-empty">
+        <div class="chips">
+          <button
+            type="button"
+            disabled={!item?.link}
+            title={item?.link ? undefined : t('ai.chip.needsLink')}
+            onclick={() => askChip('Summarize this post: the main idea and the key points.')}
+            >{t('ai.chip.summarize')}</button
+          >
+          <button type="button" onclick={() => askChip('What are the key takeaways?')}
+            >{t('ai.chip.takeaways')}</button
+          >
+          <button type="button" onclick={() => askChip('Explain this post in simple terms.')}
+            >{t('ai.chip.explain')}</button
+          >
+        </div>
+        {#if sessions.length > 0}
+          <div class="previous">
+            <p class="previous-label">{t('ai.previous')}</p>
+            {#each sessions.slice(0, 3) as session (session.id)}
+              <button type="button" class="previous-item" onclick={() => openSession(session)}>
+                <span class="history-title">{session.title}</span>
+                <span class="history-meta"
+                  >{PROVIDER_NAMES[session.provider]} · {formatRelative(session.updatedAt)}</span
+                >
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
-    </div>
-    <div class="history-list">
-      {#if loadingSessions}
-        <p class="subtle">Loading history…</p>
-      {:else if sessions.length === 0}
-        <div class="empty-placeholder">
-          <span class="empty-placeholder-icon"><Icon name="ask-ai" size={20} /></span>
-          <p>No AI conversations for this post yet.</p>
+    {:else if loadingMessages}
+      <p class="subtle">{t('ai.loading')}</p>
+    {:else if selectedSessionId && messages.length === 0 && !sending}
+      <p class="subtle" role="status">{transcriptNote ?? t('ai.transcriptMissing')}</p>
+    {/if}
+
+    {#each messages as message (message.id)}
+      {#if message.role === 'user'}
+        <div class="message user">
+          <span class="visually-hidden">{t('ai.you')}</span>
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+          <div class="message-content">{@html renderMarkdown(message.content)}</div>
         </div>
       {:else}
-        {#each sessions as session (session.id)}
-          <div class="history-row" class:current={selectedSessionId === session.id}>
-            <button
-              class="history-open"
-              type="button"
-              disabled={sending}
-              onclick={() => openSession(session)}
-            >
-              <span class="history-provider"
-                >{session.provider === 'codex' ? 'Codex' : 'Claude'}</span
-              >
-              <span class="history-title">{session.title}</span>
-              <time>{formatTime(session.updatedAt)}</time>
-            </button>
-            {#if confirmingRemoveId === session.id}
-              <div class="remove-confirm">
-                <button type="button" class="remove-cancel" onclick={cancelRemoveSession}
-                  >Cancel</button
-                >
-                <button
-                  type="button"
-                  class="remove-confirm-btn"
-                  onclick={() => removeSession(session)}>Remove</button
-                >
-              </div>
-            {:else}
-              <button
-                class="remove-session"
-                type="button"
-                disabled={sending}
-                aria-label="Remove from Aequo history"
-                onclick={() => requestRemoveSession(session)}
-              >
-                <Icon name="close" size={13} />
-              </button>
-            {/if}
-          </div>
-        {/each}
+        <div class="message assistant">
+          <span class="visually-hidden">{PROVIDER_NAMES[provider]}</span>
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+          <div class="message-content">{@html renderMarkdown(message.content)}</div>
+          <button
+            class="icon-button small copy"
+            type="button"
+            aria-label={copiedMessageId === message.id ? t('ai.copied') : t('ai.copy')}
+            title={copiedMessageId === message.id ? t('ai.copied') : t('ai.copy')}
+            onclick={() => copyMessage(message)}
+            ><Icon name={copiedMessageId === message.id ? 'check' : 'copy'} size={13} /></button
+          >
+        </div>
       {/if}
-    </div>
-    <p class="history-note">
-      Removing a session here does not delete it from the CLI's own history.
-    </p>
-  {:else}
-    <div class="empty-placeholder">
-      <span class="empty-placeholder-icon"><Icon name="ask-ai" size={20} /></span>
-      <p>Select a post to view its AI session history.</p>
-    </div>
-  {/if}
+    {/each}
+
+    {#if run && sending}
+      <div class="message user">
+        <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+        <div class="message-content">{@html renderMarkdown(run.prompt)}</div>
+      </div>
+      <div class="message assistant" aria-live="polite" aria-busy="true">
+        {#if run.text}
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+          <div class="message-content">{@html renderMarkdown(run.text)}</div>
+        {:else}
+          <div class="thinking">
+            <span></span><span></span><span></span>
+            {t(
+              run.status === 'thinking'
+                ? 'ai.status.thinking'
+                : run.status === 'tool'
+                  ? 'ai.status.tool'
+                  : 'ai.status.working',
+            )}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    {#if transcriptNote && selectedSessionId && messages.length > 0}
+      <p class="subtle" role="status">{transcriptNote}</p>
+    {/if}
+    {#if notice}
+      <p class="subtle" role="status">{notice}</p>
+    {/if}
+  </div>
 
   {#if error}
     <div class="error-card" role="alert">
       <span class="error-mark"><Icon name="error" size={12} /></span>
       <div class="error-copy">
-        <strong>Couldn’t complete that</strong>
+        <strong>{t('ai.errorTitle')}</strong>
         <p>{error}</p>
       </div>
       {#if lastPrompt && item && !sending}<button
           type="button"
-          onclick={() => submitMessage(lastPrompt)}>Retry</button
+          onclick={() => submitMessage(lastPrompt)}>{t('ai.retry')}</button
         >{/if}
       <button
         class="dismiss-error"
         type="button"
-        aria-label="Dismiss error"
+        aria-label={t('ai.dismissError')}
         onclick={() => (error = null)}><Icon name="close" size={13} /></button
       >
     </div>
   {/if}
-  <footer class="panel-footer">
-    <span class="footer-dot"></span> Runs through your signed-in local CLI
-    <span class="footer-divider">·</span> No API key in Aequo
-  </footer>
+
+  <form
+    class="composer"
+    onsubmit={(event) => {
+      event.preventDefault();
+      submitMessage();
+    }}
+  >
+    {#if quote}
+      <div class="quote-chip">
+        <p>{quote}</p>
+        <button
+          class="icon-button small"
+          type="button"
+          aria-label={t('ai.removeQuote')}
+          title={t('ai.removeQuote')}
+          onclick={() => (quote = null)}><Icon name="close" size={12} /></button
+        >
+      </div>
+    {/if}
+    <div class="composer-row">
+      <textarea
+        bind:value={draft}
+        bind:this={composerEl}
+        rows="1"
+        aria-label={t('ai.composer')}
+        placeholder={t('ai.placeholder')}
+        disabled={!item}
+        oninput={resizeComposer}
+        onkeydown={(event) => {
+          // Enter sends, Shift+Enter breaks the line; never while an IME
+          // (e.g. Korean) is still composing a character.
+          if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+            event.preventDefault();
+            submitMessage();
+          }
+        }}></textarea>
+      {#if sending}
+        <button
+          class="send stop"
+          type="button"
+          aria-label={t('ai.stop')}
+          title={t('ai.stop')}
+          disabled={!run?.requestId}
+          onclick={stopRun}><Icon name="stop" size={14} /></button
+        >
+      {:else}
+        <button
+          class="send"
+          type="submit"
+          aria-label={t('ai.send')}
+          title={t('ai.send')}
+          disabled={!item || (!draft.trim() && !quote)}><Icon name="send" size={14} /></button
+        >
+      {/if}
+    </div>
+  </form>
 </aside>
 
 <style>
@@ -675,461 +689,318 @@
     color: var(--color-text);
   }
 
-  .ai-panel > :global(.empty-placeholder) {
-    flex: 1;
-    min-height: 0;
-  }
-
   .panel-header {
-    padding: 14px 14px 0;
+    display: flex;
+    min-height: 48px;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
     border-bottom: 1px solid var(--color-border);
   }
 
-  .panel-title {
+  .provider {
+    min-width: 0;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text);
+    font: inherit;
+    font-size: var(--text-body);
+    font-weight: var(--weight-medium);
+    cursor: pointer;
+  }
+
+  .provider:hover:not(:disabled) {
+    background: var(--color-hover-bg);
+  }
+
+  .header-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 11px;
+    gap: 2px;
   }
 
-  .spark {
-    display: inline-flex;
-    align-items: center;
-    color: var(--color-accent);
-  }
-
-  h2 {
-    margin: 0;
-    font-size: var(--text-title);
-    font-weight: var(--weight-bold);
-  }
-
-  .local-status {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    margin-left: auto;
-    padding: 3px 7px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-pill);
-    color: var(--color-text-tertiary);
-    font-size: var(--text-caption);
-  }
-
-  .collapse-panel {
+  .icon-button {
     display: grid;
-    width: 24px;
-    height: 24px;
-    margin-left: 6px;
+    width: 30px;
+    height: 30px;
     flex-shrink: 0;
     place-items: center;
-    border: 1px solid var(--color-border);
+    border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-text-secondary);
-    font: inherit;
     cursor: pointer;
   }
 
-  .collapse-panel:hover {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
+  .icon-button.small {
+    width: 24px;
+    height: 24px;
   }
 
-  .local-status i,
-  .footer-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--color-success);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-success) 16%, transparent);
-  }
-
-  .tabs {
-    display: flex;
-    gap: 16px;
-  }
-
-  .tabs button {
-    padding: 0 1px 9px;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    background: transparent;
-    color: var(--color-text-tertiary);
-    font: inherit;
-    font-size: var(--text-body);
-    cursor: pointer;
-  }
-
-  .tabs button.active {
-    border-bottom-color: var(--color-accent);
+  .icon-button:hover:not(:disabled) {
+    background: var(--color-hover-bg);
     color: var(--color-text);
-    font-weight: var(--weight-medium);
   }
 
-  .tabs button:disabled {
+  .icon-button:disabled {
     opacity: 0.4;
     cursor: default;
   }
 
-  .provider-picker {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 8px 12px 10px;
+  .history-anchor {
+    position: relative;
+  }
+
+  .history-popover {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 30;
+    width: 300px;
+    max-height: 360px;
+    overflow-y: auto;
+    padding: var(--space-1);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
     background: var(--color-bg);
+    box-shadow: var(--shadow-popover);
   }
 
-  .provider-row {
-    padding: 8px 13px 0;
+  .history-popover ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
   }
 
-  .provider-label {
-    color: var(--color-text-tertiary);
-    font-size: var(--text-caption);
-    font-weight: var(--weight-bold);
-    letter-spacing: 0.09em;
-    border-bottom: 1px solid var(--color-border);
-  }
-
-  .provider-picker button {
-    min-height: 32px;
-    padding: 6px 11px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-text-secondary);
-    font: inherit;
-    font-size: var(--text-small);
-    cursor: pointer;
-  }
-
-  .provider-picker button.active {
-    border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
-    background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg));
-    color: var(--color-text);
-    font-weight: var(--weight-medium);
-  }
-
-  .provider-picker .new-chat {
-    margin-left: auto;
-    color: var(--color-accent);
-  }
-
-  button:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-
-  .post-context {
+  .history-popover li {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-width: 0;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-bg-secondary);
+    gap: 2px;
+    border-radius: var(--radius-xs);
   }
 
-  .context-copy {
+  .history-popover li.current {
+    background: var(--color-selection-bg);
+  }
+
+  .history-popover .confirm-row {
+    flex: 1;
+    margin: var(--space-1);
+  }
+
+  .history-open,
+  .previous-item {
     display: flex;
     min-width: 0;
     flex: 1;
     flex-direction: column;
-    gap: 3px;
-  }
-
-  .context-label {
-    flex-shrink: 0;
-    color: var(--color-text-tertiary);
-    font-size: var(--text-caption);
-    font-weight: var(--weight-bold);
-    letter-spacing: 0.06em;
-  }
-
-  .context-title {
-    overflow: hidden;
-    color: var(--color-text-secondary);
+    gap: 2px;
+    padding: 6px var(--space-2);
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: transparent;
     color: var(--color-text);
-    font-size: var(--text-small);
-    font-weight: var(--weight-medium);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .history-open:hover:not(:disabled),
+  .previous-item:hover {
+    background: var(--color-hover-bg);
+  }
+
+  .history-title {
+    overflow: hidden;
+    font-size: var(--text-body);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .context-link {
-    display: grid;
-    width: 27px;
-    height: 27px;
-    flex: 0 0 auto;
-    place-items: center;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    color: var(--color-text-secondary);
-    text-decoration: none;
-  }
-
-  .context-link:hover {
-    color: var(--color-accent);
-    background: var(--color-bg);
-  }
-
-  .conversation-state {
-    flex: 0 0 auto;
+  .history-meta {
     color: var(--color-text-tertiary);
     font-size: var(--text-caption);
   }
 
-  .chat-messages,
-  .history-list {
-    min-height: 0;
-    flex: 1;
-    overflow-y: auto;
-    padding: 12px;
+  .history-empty {
+    margin: var(--space-3);
+    color: var(--color-text-secondary);
+    font-size: var(--text-small);
   }
 
-  .history-list {
-    padding: 14px;
+  .chat-messages {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--space-4);
+    overflow-y: auto;
+    padding: var(--space-4) var(--space-4) var(--space-3);
+  }
+
+  .switch-note {
+    margin: 0;
+    color: var(--color-text-secondary);
+    font-size: var(--text-small);
+  }
+
+  .switch-note button {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-accent);
+    font: inherit;
+    cursor: pointer;
   }
 
   .chat-empty {
     display: flex;
-    min-height: 100%;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    padding: 20px 8px;
-    color: var(--color-text-secondary);
-    text-align: center;
+    gap: var(--space-5);
+    margin-top: auto;
   }
 
-  .empty-icon {
-    display: grid;
-    width: 38px;
-    height: 38px;
-    place-items: center;
-    border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-border));
-    border-radius: var(--radius-xl);
-    background: color-mix(in srgb, var(--color-accent) 9%, var(--color-bg));
-    color: var(--color-accent);
-  }
-
-  .chat-empty h3 {
-    margin: 0;
-    color: var(--color-text);
-    font-size: var(--text-title);
-    font-weight: var(--weight-bold);
-  }
-
-  .chat-empty p {
-    max-width: 240px;
-    margin: 0;
-    font-size: var(--text-body);
-    line-height: 1.5;
-  }
-
-  .suggestions {
+  .chips {
     display: flex;
-    width: 100%;
     flex-wrap: wrap;
-    justify-content: center;
-    gap: 6px;
-    margin-top: 4px;
+    gap: var(--space-2);
   }
 
-  .suggestions button {
-    padding: 6px 8px;
+  .chips button {
+    padding: 6px var(--space-3);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-pill);
     background: var(--color-bg);
-    color: var(--color-text-secondary);
+    color: var(--color-text);
     font: inherit;
     font-size: var(--text-small);
     cursor: pointer;
-    transition:
-      border-color 120ms ease,
-      color 120ms ease,
-      transform 120ms ease;
   }
 
-  .suggestions button:hover:not(:disabled) {
-    transform: translateY(-1px);
+  .chips button:hover:not(:disabled) {
     border-color: var(--color-accent);
     color: var(--color-accent);
   }
 
-  .summarize {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    min-height: 36px;
-    padding: 8px 12px;
-    border: 0;
-    border-radius: var(--radius-md);
-    background: var(--color-accent-solid);
-    color: var(--color-on-accent);
-    font: inherit;
-    font-size: var(--text-body);
-    font-weight: var(--weight-medium);
-    cursor: pointer;
+  .chips button:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
 
-  .summarize:hover:not(:disabled) {
-    filter: brightness(1.05);
+  .previous {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
 
-  .hint,
-  .subtle {
-    color: var(--color-text-tertiary);
-    font-size: var(--text-small);
-  }
-
-  .transcript-empty,
-  .transcript-note {
-    margin: 8px 4px 14px;
-    padding: 9px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-bg-secondary);
+  .previous-label {
+    margin: 0 var(--space-2) var(--space-1);
     color: var(--color-text-tertiary);
     font-size: var(--text-caption);
-    line-height: 1.45;
   }
 
-  .transcript-note {
-    margin-top: 14px;
+  .subtle {
+    margin: 0;
+    color: var(--color-text-secondary);
+    font-size: var(--text-small);
+    line-height: 1.5;
   }
 
   .message {
     position: relative;
-    margin-bottom: 13px;
-    padding: 10px 11px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    background: var(--color-bg-secondary);
-  }
-
-  .message:last-child {
-    margin-bottom: 0;
+    min-width: 0;
   }
 
   .message.user {
-    border-color: color-mix(in srgb, var(--color-accent) 24%, var(--color-border));
-    background: var(--color-selection-bg);
+    align-self: flex-end;
+    max-width: 85%;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-lg);
+    background: var(--color-hover-bg);
   }
 
-  .message.user .message-role {
-    color: var(--color-accent);
+  .message.assistant {
+    padding-right: var(--space-5);
   }
 
-  .copy-response {
-    margin-top: 8px;
-    padding: 3px 6px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-text-tertiary);
-    font: inherit;
-    font-size: var(--text-caption);
-    cursor: pointer;
+  .message .copy {
+    position: absolute;
+    top: -4px;
+    right: 0;
+    opacity: 0;
   }
 
-  .copy-response:hover {
-    border-color: var(--color-border);
-    background: var(--color-bg);
-    color: var(--color-text);
-  }
-
-  .message-role {
-    display: block;
-    margin-bottom: 5px;
-    color: var(--color-text-tertiary);
-    font-size: var(--text-caption);
-    font-weight: var(--weight-bold);
+  .message.assistant:hover .copy,
+  .message .copy:focus-visible {
+    opacity: 1;
   }
 
   .message-content {
-    color: var(--color-text);
     font-size: var(--text-body);
-    line-height: 1.55;
+    line-height: 1.6;
     overflow-wrap: anywhere;
+    word-break: keep-all;
   }
 
-  .message-content :global(p) {
-    margin: 0 0 0.75em;
-    white-space: normal;
+  .message-content :global(p),
+  .message-content :global(ul),
+  .message-content :global(ol),
+  .message-content :global(pre) {
+    margin: 0 0 var(--space-2);
   }
 
-  .message-content :global(p:last-child) {
+  .message-content :global(:last-child) {
     margin-bottom: 0;
   }
 
   .message-content :global(h1),
   .message-content :global(h2),
-  .message-content :global(h3),
-  .message-content :global(h4) {
-    margin: 1em 0 0.45em;
-    line-height: 1.3;
+  .message-content :global(h3) {
+    margin: var(--space-3) 0 var(--space-1);
+    font-size: var(--text-title);
+    font-weight: var(--weight-bold);
   }
 
-  .message-content :global(h1) {
-    font-size: var(--text-title);
-  }
-  .message-content :global(h2) {
-    font-size: var(--text-title);
-  }
-  .message-content :global(h3),
   .message-content :global(h4) {
+    margin: var(--space-2) 0 var(--space-1);
     font-size: var(--text-body);
+    font-weight: var(--weight-bold);
   }
 
   .message-content :global(ul),
   .message-content :global(ol) {
-    margin: 0.5em 0 0.8em;
-    padding-left: 1.4em;
+    padding-left: 1.3em;
   }
 
-  .message-content :global(li + li) {
-    margin-top: 0.3em;
-  }
-
-  .message-content :global(a) {
-    color: var(--color-accent);
-    text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
-    text-underline-offset: 2px;
+  .message-content :global(li) {
+    margin: 2px 0;
   }
 
   .message-content :global(code) {
-    padding: 0.12em 0.35em;
-    border: 1px solid var(--color-border);
+    padding: 1px 4px;
     border-radius: var(--radius-xs);
-    background: color-mix(in srgb, var(--color-bg) 72%, var(--color-accent) 8%);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--color-bg-secondary);
     font-size: var(--text-small);
   }
 
   .message-content :global(pre) {
-    overflow: auto;
-    margin: 0.75em 0;
-    padding: 10px 11px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-bg);
-    line-height: 1.5;
-    tab-size: 2;
+    overflow-x: auto;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-secondary);
   }
 
   .message-content :global(pre code) {
-    display: block;
-    min-width: max-content;
     padding: 0;
-    border: 0;
     background: transparent;
-    color: var(--color-text);
     font-size: var(--text-small);
-    white-space: pre;
+  }
+
+  .message-content :global(a) {
+    color: var(--color-accent);
   }
 
   .thinking {
@@ -1144,296 +1015,124 @@
     width: 5px;
     height: 5px;
     border-radius: 50%;
-    background: var(--color-text-tertiary);
-    animation: pulse 1.1s infinite ease-in-out;
+    background: currentColor;
+    animation: pulse 1.2s infinite ease-in-out;
   }
 
   .thinking span:nth-child(2) {
     animation-delay: 0.15s;
   }
+
   .thinking span:nth-child(3) {
+    margin-right: var(--space-1);
     animation-delay: 0.3s;
-    margin-right: 4px;
   }
 
   @keyframes pulse {
     0%,
-    60%,
+    80%,
     100% {
-      opacity: 0.35;
-      transform: translateY(0);
+      opacity: 0.25;
     }
-    30% {
+    40% {
       opacity: 1;
-      transform: translateY(-2px);
     }
   }
 
-  .pending {
-    border-style: dashed;
-    background: transparent;
+  .error-card {
+    margin: 0 var(--space-3) var(--space-2);
   }
 
   .composer {
-    margin: 10px;
-    padding: 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    background: var(--color-bg);
+    padding: var(--space-2) var(--space-3) var(--space-3);
   }
 
-  .composer:focus-within {
-    border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 10%, transparent);
-  }
-
-  .composer textarea {
-    display: block;
-    width: 100%;
-    min-height: 38px;
-    max-height: 180px;
-    resize: none;
-    border: 0;
-    outline: none;
-    background: transparent;
-    color: var(--color-text);
-    font: inherit;
-    font-size: var(--text-body);
-    line-height: 1.45;
-  }
-
-  .composer textarea::placeholder {
-    color: var(--color-text-tertiary);
-  }
-
-  .composer-footer {
+  .quote-chip {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding-top: 6px;
-    color: var(--color-text-tertiary);
-    font-size: var(--text-caption);
-  }
-
-  .composer-footer button {
-    display: grid;
-    width: 32px;
-    height: 32px;
-    place-items: center;
-    border: 0;
-    border-radius: var(--radius-lg);
-    background: var(--color-accent-solid);
-    color: var(--color-on-accent);
-    font: inherit;
-    font-size: var(--text-small);
-    cursor: pointer;
-  }
-
-  .composer-footer button:hover:not(:disabled) {
-    filter: brightness(1.08);
-  }
-
-  .history-heading {
-    padding: 13px 13px 0;
-  }
-
-  .history-heading h3 {
-    margin: 0 0 3px;
-    font-size: var(--text-title);
-    font-weight: var(--weight-bold);
-  }
-
-  .history-heading p {
-    margin: 0;
-    color: var(--color-text-tertiary);
-    font-size: var(--text-body);
-  }
-
-  .history-row {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    margin-bottom: 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    background: var(--color-bg);
-    transition:
-      border-color 120ms ease,
-      background 120ms ease;
-  }
-
-  .history-row:last-child {
-    margin-bottom: 0;
-  }
-
-  .history-row:hover {
-    border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+    align-items: flex-start;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+    padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+    border-left: 3px solid var(--color-accent);
+    border-radius: var(--radius-xs);
     background: var(--color-bg-secondary);
   }
 
-  .history-row.current {
+  .quote-chip p {
+    display: -webkit-box;
+    min-width: 0;
+    flex: 1;
+    margin: 2px 0;
+    overflow: hidden;
+    color: var(--color-text-secondary);
+    font-size: var(--text-small);
+    line-height: 1.45;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
+
+  .composer-row {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg);
+  }
+
+  .composer-row:focus-within {
     border-color: var(--color-accent);
   }
 
-  .history-open {
-    display: flex;
+  textarea {
     min-width: 0;
     flex: 1;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-    padding: 11px 10px;
+    max-height: 180px;
+    padding: 6px 0;
     border: 0;
-    border-radius: inherit;
     background: transparent;
     color: var(--color-text);
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .history-provider {
-    display: inline-flex;
-    align-items: center;
-    min-height: 19px;
-    padding: 2px 7px;
-    border-radius: var(--radius-pill);
-    background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg));
-    color: var(--color-accent);
-    font-size: var(--text-small);
-    font-weight: var(--weight-bold);
-  }
-
-  .history-title {
-    width: 100%;
-    overflow: hidden;
+    font: inherit;
     font-size: var(--text-body);
-    line-height: 1.35;
-    font-weight: var(--weight-medium);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .history-row time {
-    color: var(--color-text-tertiary);
-    font-size: var(--text-small);
-  }
-
-  .remove-session {
-    display: grid;
-    flex-shrink: 0;
-    margin-right: 5px;
-    width: 28px;
-    height: 28px;
-    place-items: center;
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-text-tertiary);
-    font: inherit;
-    cursor: pointer;
-  }
-
-  .remove-session:hover {
-    background: var(--color-hover-bg);
-    color: var(--color-error);
-  }
-
-  .remove-confirm {
-    display: flex;
-    flex-shrink: 0;
-    align-items: center;
-    gap: 4px;
-    margin-right: 5px;
-  }
-
-  .remove-confirm button {
-    min-height: 26px;
-    padding: 3px 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: var(--color-bg);
-    color: var(--color-text-secondary);
-    font: inherit;
-    font-size: var(--text-caption);
-    cursor: pointer;
-  }
-
-  .remove-cancel:hover {
-    background: var(--color-hover-bg);
-  }
-
-  .remove-confirm-btn {
-    border-color: var(--color-error);
-    background: var(--color-error);
-    color: var(--color-on-error);
-  }
-
-  .remove-confirm-btn:hover {
-    filter: brightness(0.92);
-  }
-
-  .history-open:focus-visible,
-  .remove-session:focus-visible,
-  .provider-picker button:focus-visible,
-  .tabs button:focus-visible,
-  .composer-footer button:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .thinking span {
-      animation: none;
-    }
-    .history-row {
-      transition: none;
-    }
-  }
-
-  .history-note {
-    margin: 0 12px 10px;
-    color: var(--color-text-tertiary);
-    font-size: var(--text-small);
     line-height: 1.5;
+    resize: none;
   }
 
-  /* Base error-card look lives in the shared global (src/routes/+layout.svelte);
-     only the panel-specific inset margin is overridden here. */
-  :global(.ai-panel .error-card) {
-    margin: 0 10px 8px;
+  textarea:focus {
+    outline: none;
   }
 
-  .panel-footer {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 11px;
-    border-top: 1px solid var(--color-border);
-    color: var(--color-text-tertiary);
-    font-size: var(--text-caption);
-    line-height: 1.35;
+  .send {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--color-accent-solid);
+    color: var(--color-on-accent);
+    cursor: pointer;
   }
 
-  .footer-dot {
-    width: 5px;
-    height: 5px;
-    flex: 0 0 auto;
-  }
-  .footer-divider {
-    opacity: 0.55;
+  .send:disabled {
+    opacity: 0.35;
+    cursor: default;
   }
 
-  @media (max-width: 380px) {
-    .panel-footer {
-      flex-wrap: wrap;
-    }
-    .conversation-state {
-      display: none;
-    }
-    .composer-footer span {
-      max-width: 220px;
-    }
+  .send.stop {
+    background: var(--color-text);
+    color: var(--color-bg);
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 </style>

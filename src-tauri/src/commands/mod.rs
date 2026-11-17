@@ -11,6 +11,7 @@ use crate::db;
 
 pub mod add_feed;
 pub mod ai;
+mod ai_stream;
 mod ai_transcript;
 pub mod annotations;
 pub mod article;

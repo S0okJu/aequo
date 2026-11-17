@@ -589,11 +589,18 @@ Claude Fable 5.2 vs. Fable 5.1: Fewer refusals…
 - §3.12. 백엔드(스키마, `fetch/favicon.rs`, `get_feed_icons`, 이벤트) → `FeedIcon.svelte` → 각 화면 적용 순서.
 - UI1에서 만든 첫 글자 대체 표시를 `FeedIcon`으로 교체한다.
 
-### UI9. AI 채팅 패널 정리 — [ ]
+### UI9. AI 채팅 패널 정리 — [x]
+- 구현 중 결정됨: 빠른 질문 칩의 프롬프트는 영어로 두고 언어 지시만 덧붙인다(피드 `language`가 있으면 그 태그, 없으면 "글의 언어로"). 칩 라벨만 앱 언어.
+  인용은 전송 시 `> ` 인용 블록으로 프롬프트 앞에 붙인다. 응답 대기 중 다른 글로 옮기면 화면은 그 실행을 놓지만 백엔드는 끝까지 받아 세션에 남긴다(이전 대화에서 열림).
+  Markdown 렌더러는 그대로 `src/lib/markdown.ts`로 옮겼다.
 - §3.9 중 프론트 작업: 한 줄 헤더, 기록 팝오버, provider 저장, 빈 상태/이전 대화, 메시지 스타일, 인용 칩, IME 체크, 푸터 제거.
 - 백엔드: `cancel_ai_message` 추가 + 중지 버튼. 글 전환 중 응답 저장 동작 확인.
 
-### UI10. AI 스트리밍 응답 — [ ]
+### UI10. AI 스트리밍 응답 — [x]
+- 구현 중 결정됨: 설치된 Claude Code 2.1.311 / codex-cli 0.167.0의 실제 출력을 캡처해 개인정보(경로·세션 id)를 지운 fixture로 저장했다(`tests/fixtures/ai_stream_*.jsonl`).
+  Claude는 `text_delta` 단위로 흐르고 마지막 `result`를 정답으로 쓴다. Codex는 텍스트 델타가 없어 `item.completed`에서 답 전체를 `replace`로 보낸다(그 전엔 단계 상태만).
+  `send_ai_message`는 `start_ai_message`(요청 id 즉시 반환) + `ai-stream` 이벤트 + `cancel_ai_message`로 바뀌었다. 무응답 타임아웃은 줄 사이 120초.
+  start가 돌아오기 전에 도착한 이벤트는 프론트에서 버퍼링 후 재생한다. **실제 Tauri 창에서 CLI로 스트리밍·중지를 직접 확인하는 것은 남아 있다**(헤드리스 화면 검증은 목업 이벤트로만 함).
 - §3.9 스트리밍 항목. 순서: 각 CLI 실제 출력 캡처(fixture) → `spawn` + 줄 단위 파서 → `ai-stream` 이벤트 → 프론트 이어 붙이기 →
   무응답 타임아웃. 중지(UI9)와 child 보관 구조를 공유하므로 **UI9 직후** 진행한다.
 

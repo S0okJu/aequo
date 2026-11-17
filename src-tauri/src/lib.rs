@@ -27,6 +27,7 @@ pub fn run() {
                     .as_secs() as i64,
             )?;
             app.manage(Mutex::new(conn));
+            app.manage(commands::ai::AiRuns::default());
 
             // A separate connection for the scheduler (see
             // scheduler::mod's doc comment: WAL mode is meant to let
@@ -57,7 +58,8 @@ pub fn run() {
             commands::article::load_article,
             commands::ai::list_ai_sessions,
             commands::ai::load_ai_transcript,
-            commands::ai::send_ai_message,
+            commands::ai::start_ai_message,
+            commands::ai::cancel_ai_message,
             commands::ai::delete_ai_session,
             commands::annotations::list_item_annotations,
             commands::annotations::create_annotation,

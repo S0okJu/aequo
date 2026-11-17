@@ -734,6 +734,7 @@
       {#if AiPanelComponent}
         <AiPanelComponent
           item={selectedItem}
+          language={feeds.find((feed) => feed.id === selectedItem?.feedId)?.language ?? null}
           onCollapse={() => (aiPanelOpen = false)}
           {pendingQuote}
           onConsumedPendingQuote={() => (pendingQuote = null)}

@@ -5,7 +5,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   AiProvider,
-  AiSendResult,
+  AiStart,
   AiSession,
   AiTranscript,
   Annotation,
@@ -129,13 +129,22 @@ export function loadAiTranscript(sessionId: number): Promise<AiTranscript> {
   return invoke('load_ai_transcript', { sessionId });
 }
 
-export function sendAiMessage(
+/**
+ * Starts an AI run and resolves at once with its request id; the answer
+ * arrives as `ai-stream` events (see `AiStreamEvent`).
+ */
+export function startAiMessage(
   itemId: number,
   provider: AiProvider,
   sessionId: number | null,
   prompt: string,
-): Promise<AiSendResult> {
-  return invoke('send_ai_message', { itemId, provider, sessionId, prompt });
+): Promise<AiStart> {
+  return invoke('start_ai_message', { itemId, provider, sessionId, prompt });
+}
+
+/** Stops a run; it ends with a `cancelled` event carrying the text so far. */
+export function cancelAiMessage(requestId: string): Promise<void> {
+  return invoke('cancel_ai_message', { requestId });
 }
 
 export function deleteAiSession(sessionId: number): Promise<void> {

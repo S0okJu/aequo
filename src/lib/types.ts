@@ -96,10 +96,22 @@ export interface AiMessage {
   createdAt: number;
 }
 
-export interface AiSendResult {
+export interface AiStart {
+  requestId: string;
   sessionId: number;
-  providerSessionId: string;
-  assistantMessage: AiMessage;
+}
+
+/**
+ * Payload of the `ai-stream` event: `delta` appends `text`, `replace` sets the
+ * answer so far, `status` is a progress step ("thinking" | "tool"), and
+ * `done` / `error` / `cancelled` end the run (`text` = final answer / error
+ * message / partial answer).
+ */
+export interface AiStreamEvent {
+  requestId: string;
+  sessionId: number;
+  kind: 'delta' | 'replace' | 'status' | 'done' | 'error' | 'cancelled';
+  text: string;
 }
 
 export interface AiTranscript {

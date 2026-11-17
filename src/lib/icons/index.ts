@@ -53,6 +53,12 @@ export const ICONS: Record<string, string> = {
     '<path d="M4 13l2.5-7h11L20 13v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z"/><path d="M4 13h4.5l1 2h5l1-2H20"/>',
 
   plus: '<path d="M12 5v14M5 12h14"/>',
+
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+
+  stop: '<rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none"/>',
 };
 
 export type IconName = keyof typeof ICONS;
