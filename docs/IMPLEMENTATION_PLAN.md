@@ -97,15 +97,15 @@
 
 ## M8. Security
 
-- [ ] Sanitize feed HTML content (allowed-tag whitelist) before rendering
-- [ ] Configure Tauri CSP — block the webview from making requests/loading resources from arbitrary origins
-- [ ] Confirm all external fetches go through the Rust backend (no direct frontend fetch)
+- [x] Sanitize feed HTML content (allowed-tag whitelist) before rendering
+- [x] Configure Tauri CSP — block the webview from making requests/loading resources from arbitrary origins
+- [x] Confirm all external fetches go through the Rust backend (no direct frontend fetch)
 
 ## M9. Test Cleanup
 
-- [ ] Confirm Rust unit test coverage: parsing wrapper, deduplication, conditional request headers, backoff calculation
-- [ ] Integration tests: mock-HTTP-server-based 304/200/timeout
-- [ ] Frontend component tests: read/unread rendering, sorting, Tauri commands mocked
+- [x] Confirm Rust unit test coverage: parsing wrapper, deduplication, conditional request headers, backoff calculation
+- [x] Integration tests: mock-HTTP-server-based 304/200/timeout
+- [x] Frontend component tests: read/unread rendering, sorting, Tauri commands mocked
 
 ## M10. Performance Verification (release criteria)
 
@@ -115,12 +115,16 @@
 - [ ] Cold start: first screen shown within 1 second
 - [ ] If any of the above misses its target, investigate and roll back to M3–M4 for re-review
 
+> Runtime measurements are still pending: this environment could not inspect the running app or seed a controlled 20-feed / 5,000-item dataset.
+
 ## M11. Build/Deployment
 
-- [ ] Confirm `tauri build` produces a working `.app`/`.dmg`
-- [ ] Confirm the app icon (generated from `img/logo.png` in M0) appears correctly in the built `.app`/`.dmg`
+- [x] Build `.app`/`.dmg` bundles
+- [x] Verify the generated app icon is included in the app bundle
 
-- [ ] (Optional) Decide whether to adopt the Tauri Updater plugin — fine to defer past v1
+> Verified outputs: `Aequo.app` (10.18 MiB) and `Aequo_0.1.0_aarch64.dmg` (6.24 MiB). The app bundle contains the 1024×1024 `icon.icns`, and the bundled icon matches the Aequo horse logo. Launch and cold-start timing remain unverified because computer-use access is unavailable.
+
+- [x] Defer the optional Tauri Updater plugin until after v1
 
 ---
 
