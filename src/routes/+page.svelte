@@ -1,14 +1,62 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import { listen } from '@tauri-apps/api/event';
+  import type AiPanelType from '$lib/components/AiPanel.svelte';
   import FeedList from '$lib/components/FeedList.svelte';
-  import Timeline from '$lib/components/Timeline.svelte';
-  import DetailView from '$lib/components/DetailView.svelte';
-  import AddFeedForm from '$lib/components/AddFeedForm.svelte';
-  import { listFeeds, listItems, markRead } from '$lib/api';
-  import type { FeedSummary, Item } from '$lib/types';
+  import PostsFeed from '$lib/components/PostsFeed.svelte';
+  import PostReader from '$lib/components/PostReader.svelte';
+  import Icon from '$lib/icons/Icon.svelte';
+  import Spinner from '$lib/components/Spinner.svelte';
+  import { showToast } from '$lib/toast.svelte.ts';
+  import {
+    listFeeds,
+    listFeedFolders,
+    listItems,
+    markRead,
+    setItemSaved,
+    updateFeedOrganization,
+  } from '$lib/api';
+  import type { FeedFolder, FeedSummary, Item } from '$lib/types';
 
   const PAGE_SIZE = 50;
+  const TODAY_MAX_PAGES = 20; // generous cap for one day's items across all feeds
+  const REFRESH_DEBOUNCE_MS = 200;
+  const AI_RAIL_WIDTH = 40;
+  const AI_PANEL_OPEN_KEY = 'aequo:aiPanelOpen';
+  const SIDEBAR_WIDTH_KEY = 'aequo:sidebarWidth';
+
+  function readStoredAiPanelOpen(): boolean {
+    try {
+      const stored = localStorage.getItem(AI_PANEL_OPEN_KEY);
+      if (stored !== null) return stored === 'true';
+    } catch {
+      // Storage may be unavailable (private mode, etc.) - default to open.
+    }
+    return true;
+  }
+
+  function initialViewportWidth(): number {
+    try {
+      // Match the width the CSS layout can actually use. innerWidth includes
+      // the vertical scrollbar in desktop WebViews, which can make the fixed
+      // grid tracks exceed the page by the scrollbar width.
+      return document.documentElement.clientWidth || window.innerWidth;
+    } catch {
+      return 1360;
+    }
+  }
+
+  function readStoredSidebarWidth(): number {
+    try {
+      const stored = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+      if (Number.isFinite(stored) && stored > 0) return Math.min(360, Math.max(160, stored));
+    } catch {
+      // Storage may be unavailable - use the default width.
+    }
+    return 220;
+  }
 
   interface FeedUpdatedPayload {
     feedId: number;
@@ -16,33 +64,204 @@
   }
 
   let feeds = $state<FeedSummary[]>([]);
+  let folders = $state<FeedFolder[]>([]);
   let items = $state<Item[]>([]);
+  let initialLoading = $state(true);
   let hasMoreItems = $state(true);
   let loadingMoreItems = false; // plain guard against overlapping loads, not UI state
   let selectedFeedId = $state<number | null>(null);
+  let selectedFolderId = $state<number | null>(null);
+  let selectedToday = $state(false);
+  let selectedStarred = $state(false);
   let selectedItemId = $state<number | null>(null);
+  let viewportWidth = $state(initialViewportWidth());
+  let sidebarWidth = $state(readStoredSidebarWidth());
+  let readerWidth = $state(500);
+  let aiWidth = $state(400);
+  let aiPanelOpen = $state(readStoredAiPanelOpen());
+  // Loaded on demand the first time the panel opens, so the ~1500-line
+  // AiPanel component isn't parsed/compiled into the main chunk for
+  // sessions that keep it collapsed.
+  let AiPanelComponent = $state<typeof AiPanelType | null>(null);
+  let isDragging = $state(false);
+  // One-shot: set when the reader's "Ask AI" selection toolbar button is
+  // clicked, consumed by AiPanel to prefill a new session's draft, then
+  // cleared (docs/READER_ANNOTATIONS_PLAN.md §4.3). PostReader and AiPanel
+  // are sibling panes here, not parent/child, so this has to live here.
+  let pendingQuote = $state<string | null>(null);
+  const postListWidth = $derived(Math.min(270, Math.max(220, Math.round(viewportWidth * 0.2))));
 
-  const selectedItem = $derived(items.find((i) => i.id === selectedItemId) ?? null);
+  const selectedItem = $derived(items.find((item) => item.id === selectedItemId) ?? null);
+
+  // Every grid track below is a plain pixel number (never a mix of fixed
+  // and `minmax(...,1fr)` shapes) so `.layout`'s grid-template-columns
+  // transition can interpolate smoothly instead of snapping - browsers
+  // can't animate between differently-shaped track definitions.
+  const showReader = $derived(selectedItem !== null);
+  const readerHandleWidth = $derived(showReader ? 6 : 0);
+  const aiHandleWidth = $derived(aiPanelOpen ? 6 : 0);
+  const minimumReaderWidth = $derived(showReader ? 320 : 0);
+  const minimumAiWidth = $derived(aiPanelOpen ? 300 : AI_RAIL_WIDTH);
+  const layoutSidebarWidth = $derived(
+    Math.min(
+      sidebarWidth,
+      Math.max(
+        160,
+        viewportWidth -
+          postListWidth -
+          minimumReaderWidth -
+          minimumAiWidth -
+          6 -
+          readerHandleWidth -
+          aiHandleWidth,
+      ),
+    ),
+  );
+  const effectiveAiWidth = $derived(
+    aiPanelOpen
+      ? Math.min(
+          aiWidth,
+          Math.max(
+            300,
+            viewportWidth -
+              layoutSidebarWidth -
+              6 -
+              postListWidth -
+              minimumReaderWidth -
+              readerHandleWidth -
+              aiHandleWidth,
+          ),
+        )
+      : AI_RAIL_WIDTH,
+  );
+  const readerPaneWidth = $derived(
+    showReader
+      ? Math.min(
+          readerWidth,
+          Math.max(
+            320,
+            viewportWidth -
+              layoutSidebarWidth -
+              6 -
+              postListWidth -
+              effectiveAiWidth -
+              readerHandleWidth -
+              aiHandleWidth,
+          ),
+        )
+      : 0,
+  );
+  const postListComputedWidth = $derived(
+    Math.max(
+      postListWidth,
+      viewportWidth -
+        layoutSidebarWidth -
+        6 -
+        readerHandleWidth -
+        readerPaneWidth -
+        aiHandleWidth -
+        effectiveAiWidth,
+    ),
+  );
+
+  $effect(() => {
+    try {
+      localStorage.setItem(AI_PANEL_OPEN_KEY, String(aiPanelOpen));
+    } catch {
+      // Storage may be unavailable - the preference just won't persist.
+    }
+  });
+
+  $effect(() => {
+    if (aiPanelOpen && !AiPanelComponent) {
+      import('$lib/components/AiPanel.svelte').then((module) => {
+        AiPanelComponent = module.default;
+      });
+    }
+  });
+
+  $effect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    } catch {
+      // The current width still works if the preference cannot be persisted.
+    }
+  });
 
   async function refreshFeeds() {
-    feeds = await listFeeds();
+    const [nextFeeds, nextFolders] = await Promise.all([listFeeds(), listFeedFolders()]);
+    feeds = nextFeeds;
+    folders = nextFolders;
   }
 
   // First page of the merged timeline (§6.3) for the current feed
   // selection - replaces items entirely (a feed-updated event or a
   // feed-selection change can shift what "page 1" even means).
   async function refreshItems() {
-    items = await listItems(PAGE_SIZE, 0, false, selectedFeedId);
-    hasMoreItems = items.length === PAGE_SIZE;
+    const firstPage = await listItems(
+      PAGE_SIZE,
+      null,
+      false,
+      selectedFeedId,
+      selectedFolderId,
+      selectedStarred,
+    );
+    if (selectedToday) {
+      const now = new Date();
+      const start = Math.floor(
+        new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000,
+      );
+      const end = Math.floor(
+        new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime() / 1000,
+      );
+      const todayItems = firstPage.filter(
+        (item) => item.publishedAt >= start && item.publishedAt < end,
+      );
+      let page = firstPage;
+      let pagesFetched = 1;
+      while (
+        page.length === PAGE_SIZE &&
+        page[page.length - 1].publishedAt >= start &&
+        pagesFetched < TODAY_MAX_PAGES
+      ) {
+        const cursor = page[page.length - 1];
+        page = await listItems(
+          PAGE_SIZE,
+          { publishedAt: cursor.publishedAt, id: cursor.id },
+          false,
+          selectedFeedId,
+          selectedFolderId,
+        );
+        todayItems.push(
+          ...page.filter((item) => item.publishedAt >= start && item.publishedAt < end),
+        );
+        pagesFetched += 1;
+      }
+      items = todayItems;
+      hasMoreItems = false;
+    } else {
+      items = firstPage;
+      hasMoreItems = items.length === PAGE_SIZE;
+    }
+    if (selectedItemId !== null && !items.some((item) => item.id === selectedItemId)) {
+      selectedItemId = null;
+    }
   }
 
-  // Infinite scroll: VirtualList calls this when the user nears the
-  // bottom (onEndReached). Appends the next page via limit/offset.
+  // The post feed requests another page as the reader nears the bottom.
   async function loadMoreItems() {
-    if (loadingMoreItems || !hasMoreItems) return;
+    if (loadingMoreItems || !hasMoreItems || refreshItemsInFlight) return;
     loadingMoreItems = true;
     try {
-      const nextPage = await listItems(PAGE_SIZE, items.length, false, selectedFeedId);
+      const cursor = items[items.length - 1];
+      const nextPage = await listItems(
+        PAGE_SIZE,
+        { publishedAt: cursor.publishedAt, id: cursor.id },
+        false,
+        selectedFeedId,
+        selectedFolderId,
+        selectedStarred,
+      );
       items = [...items, ...nextPage];
       hasMoreItems = nextPage.length === PAGE_SIZE;
     } finally {
@@ -52,19 +271,49 @@
 
   function selectFeed(feedId: number | null) {
     selectedFeedId = feedId;
+    selectedFolderId = null;
+    selectedToday = false;
+    selectedStarred = false;
+    selectedItemId = null;
     refreshItems();
   }
 
-  function handleFeedAdded() {
-    refreshFeeds();
+  function selectFolder(folderId: number | null) {
+    selectedFeedId = null;
+    selectedFolderId = folderId;
+    selectedToday = false;
+    selectedStarred = false;
+    selectedItemId = null;
     refreshItems();
   }
 
-  // Opening an item marks it read (§6.3): flip locally first so the
-  // UI responds immediately, persist in the background, and revert
-  // if the backend call fails.
-  async function selectItem(itemId: number) {
-    selectedItemId = itemId;
+  function selectToday() {
+    selectedFeedId = null;
+    selectedFolderId = null;
+    selectedToday = true;
+    selectedStarred = false;
+    selectedItemId = null;
+    refreshItems();
+  }
+
+  function selectStarred() {
+    selectedFeedId = null;
+    selectedFolderId = null;
+    selectedToday = false;
+    selectedStarred = true;
+    selectedItemId = null;
+    refreshItems();
+  }
+
+  async function moveFeed(feedId: number, folderId: number | null) {
+    const feed = feeds.find((f) => f.id === feedId);
+    if (!feed || feed.folderId === folderId) return;
+    await updateFeedOrganization(feedId, folderId, feed.hiddenFromAll);
+    await refreshFeeds();
+  }
+
+  // Marking a post read updates the badge immediately, then persists it.
+  async function markPostRead(itemId: number) {
     const item = items.find((i) => i.id === itemId);
     if (!item || item.isRead) return;
 
@@ -77,47 +326,334 @@
     } catch (err) {
       item.isRead = false;
       if (feed) feed.unreadCount += 1;
+      showToast("Couldn't mark post as read", { type: 'error' });
       console.error('mark_read failed:', err);
     }
   }
 
-  onMount(() => {
-    refreshFeeds();
-    refreshItems();
+  function selectPost(itemId: number) {
+    selectedItemId = selectedItemId === itemId ? null : itemId;
+    markPostRead(itemId);
+  }
 
-    // Event-driven only (§3.2/§6.2) - no polling timer anywhere here.
-    const unlisten = listen<FeedUpdatedPayload>('feed-updated', () => {
-      refreshFeeds();
-      refreshItems();
+  async function toggleSaved(itemId: number) {
+    const item = items.find((entry) => entry.id === itemId);
+    if (!item) return;
+    const previous = item.isSaved;
+    item.isSaved = !previous;
+    // Unstarring while viewing the Starred tab should drop the item from
+    // view immediately, same as how it'd vanish on the next refresh.
+    if (selectedStarred && !item.isSaved) {
+      items = items.filter((entry) => entry.id !== itemId);
+    }
+    try {
+      await setItemSaved(itemId, item.isSaved);
+    } catch (error) {
+      item.isSaved = previous;
+      if (selectedStarred && previous) {
+        items = [...items, item].sort((a, b) => b.publishedAt - a.publishedAt || b.id - a.id);
+      }
+      showToast("Couldn't update saved state", { type: 'error' });
+      console.error('set_item_saved failed:', error);
+    }
+  }
+
+  function resizeReader(event: PointerEvent) {
+    if (event.buttons !== 1) return;
+    readerWidth = clampReaderWidth(viewportWidth - effectiveAiWidth - event.clientX - 12);
+  }
+
+  function clampReaderWidth(width: number) {
+    const maxWidth = Math.max(
+      320,
+      Math.min(760, viewportWidth - layoutSidebarWidth - 6 - postListWidth - effectiveAiWidth - 12),
+    );
+    return Math.min(maxWidth, Math.max(320, width));
+  }
+
+  function clampSidebarWidth(width: number) {
+    const minWidth = 160;
+    const maxWidth = Math.max(
+      minWidth,
+      Math.min(360, viewportWidth - 220 - (showReader ? 320 : 0) - effectiveAiWidth - 18),
+    );
+    return Math.min(maxWidth, Math.max(minWidth, width));
+  }
+
+  function resizeSidebar(event: PointerEvent) {
+    if (event.buttons !== 1) return;
+    sidebarWidth = clampSidebarWidth(event.clientX);
+  }
+
+  function resizeSidebarWithKey(event: KeyboardEvent) {
+    const step = event.shiftKey ? 48 : 24;
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      sidebarWidth = clampSidebarWidth(layoutSidebarWidth - step);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      sidebarWidth = clampSidebarWidth(layoutSidebarWidth + step);
+    }
+  }
+
+  function resizeAiPanel(event: PointerEvent) {
+    if (event.buttons !== 1) return;
+    resizeAiPanelTo(viewportWidth - event.clientX);
+  }
+
+  function resizeAiPanelWithKey(event: KeyboardEvent) {
+    const step = event.shiftKey ? 48 : 24;
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      resizeAiPanelTo(effectiveAiWidth + step);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      resizeAiPanelTo(effectiveAiWidth - step);
+    }
+  }
+
+  function resizeAiPanelTo(width: number) {
+    const minReaderWidth = showReader ? 320 : 0;
+    const maxWidth = Math.max(
+      300,
+      Math.min(560, viewportWidth - layoutSidebarWidth - 6 - postListWidth - minReaderWidth - 12),
+    );
+    aiWidth = Math.min(maxWidth, Math.max(300, width));
+    if (showReader) {
+      readerWidth = clampReaderWidth(
+        viewportWidth - layoutSidebarWidth - 6 - postListWidth - aiWidth - 12,
+      );
+    }
+  }
+
+  function beginReaderResize(event: PointerEvent) {
+    event.preventDefault();
+    isDragging = true;
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  function endResize() {
+    isDragging = false;
+  }
+
+  function resizeReaderWithKey(event: KeyboardEvent) {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      readerWidth = clampReaderWidth(readerPaneWidth + 24);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      readerWidth = clampReaderWidth(readerPaneWidth - 24);
+    }
+  }
+
+  let refreshFeedsInFlight = false;
+  let refreshItemsInFlight = false;
+  let scheduledRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // Coalesces a burst of `feed-updated` events (e.g. several feeds refreshing
+  // around the same time) into a single trailing refresh instead of firing
+  // one overlapping refresh per event.
+  function scheduleBackgroundRefresh() {
+    clearTimeout(scheduledRefreshTimer);
+    scheduledRefreshTimer = setTimeout(() => {
+      if (!refreshFeedsInFlight) {
+        refreshFeedsInFlight = true;
+        refreshFeeds().finally(() => (refreshFeedsInFlight = false));
+      }
+      if (!refreshItemsInFlight) {
+        refreshItemsInFlight = true;
+        refreshItems().finally(() => (refreshItemsInFlight = false));
+      }
+    }, REFRESH_DEBOUNCE_MS);
+  }
+
+  onMount(() => {
+    const updateViewport = () => {
+      viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    };
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    Promise.all([refreshFeeds(), refreshItems()]).finally(() => {
+      initialLoading = false;
     });
 
+    // Event-driven only (§3.2/§6.2) - no polling timer anywhere here.
+    const unlisten = listen<FeedUpdatedPayload>('feed-updated', scheduleBackgroundRefresh);
+
     return () => {
+      window.removeEventListener('resize', updateViewport);
+      clearTimeout(scheduledRefreshTimer);
       unlisten.then((fn) => fn());
     };
   });
 </script>
 
-<div class="layout">
+<div
+  class="layout"
+  class:no-transition={isDragging}
+  style={`grid-template-columns: ${layoutSidebarWidth}px 6px ${postListComputedWidth}px ${readerHandleWidth}px ${readerPaneWidth}px ${aiHandleWidth}px ${effectiveAiWidth}px`}
+>
   <aside class="pane feed-list-pane">
     <div class="feed-list-scroll">
-      <FeedList {feeds} {selectedFeedId} onSelect={selectFeed} />
+      <FeedList
+        {feeds}
+        {folders}
+        loading={initialLoading}
+        {selectedFeedId}
+        {selectedFolderId}
+        {selectedToday}
+        {selectedStarred}
+        onSelectFeed={selectFeed}
+        onSelectFolder={selectFolder}
+        onSelectToday={selectToday}
+        onSelectStarred={selectStarred}
+        onManageFolders={() => goto(resolve('/settings?tab=folders'))}
+        onMoveFeed={moveFeed}
+      />
     </div>
-    <AddFeedForm onAdded={handleFeedAdded} />
+    <button class="settings-button" onclick={() => goto(resolve('/settings'))}>
+      <Icon name="settings" size={14} />
+      Manage feeds
+    </button>
   </aside>
-  <main class="pane timeline-pane">
-    <Timeline {items} {feeds} {selectedItemId} onSelect={selectItem} onEndReached={loadMoreItems} />
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+  <div
+    class="resize-handle sidebar-resize-handle"
+    role="separator"
+    aria-label="Resize feed navigation"
+    aria-orientation="vertical"
+    aria-valuemin={160}
+    aria-valuemax={clampSidebarWidth(360)}
+    aria-valuenow={layoutSidebarWidth}
+    tabindex="0"
+    onpointerdown={beginReaderResize}
+    onpointermove={resizeSidebar}
+    onpointerup={endResize}
+    onpointercancel={endResize}
+    onlostpointercapture={endResize}
+    onkeydown={resizeSidebarWithKey}
+  ></div>
+  <main class="pane posts-pane">
+    {#key `${selectedFeedId}-${selectedFolderId}-${selectedToday}-${selectedStarred}`}
+      <PostsFeed
+        {items}
+        {feeds}
+        {folders}
+        loading={initialLoading}
+        {selectedFeedId}
+        {selectedFolderId}
+        {selectedToday}
+        {selectedStarred}
+        {selectedItemId}
+        hasMore={hasMoreItems}
+        onSelect={selectPost}
+        onToggleSaved={toggleSaved}
+        onEndReached={loadMoreItems}
+      />
+    {/key}
   </main>
-  <aside class="pane detail-pane">
-    <DetailView item={selectedItem} {feeds} />
-  </aside>
+  {#if selectedItem}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+    <div
+      class="resize-handle"
+      role="separator"
+      aria-label="Resize article reader"
+      aria-orientation="vertical"
+      aria-valuemin={320}
+      aria-valuemax={clampReaderWidth(760)}
+      aria-valuenow={readerPaneWidth}
+      tabindex="0"
+      onpointerdown={beginReaderResize}
+      onpointermove={resizeReader}
+      onpointerup={endResize}
+      onpointercancel={endResize}
+      onlostpointercapture={endResize}
+      onkeydown={resizeReaderWithKey}
+    ></div>
+    <main class="pane reader-pane">
+      <PostReader
+        item={selectedItem}
+        {feeds}
+        onClose={() => (selectedItemId = null)}
+        onToggleSaved={toggleSaved}
+        onAskAi={(quotedText) => {
+          pendingQuote = quotedText;
+          aiPanelOpen = true;
+        }}
+      />
+    </main>
+  {/if}
+  {#if aiPanelOpen}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+    <div
+      class="resize-handle ai-resize-handle"
+      role="separator"
+      aria-label="Resize AI panel"
+      aria-orientation="vertical"
+      aria-valuemin={300}
+      aria-valuemax={560}
+      aria-valuenow={effectiveAiWidth}
+      tabindex="0"
+      onpointerdown={beginReaderResize}
+      onpointermove={resizeAiPanel}
+      onpointerup={endResize}
+      onpointercancel={endResize}
+      onlostpointercapture={endResize}
+      onkeydown={resizeAiPanelWithKey}
+    ></div>
+    <aside class="pane ai-pane">
+      {#if AiPanelComponent}
+        <AiPanelComponent
+          item={selectedItem}
+          onCollapse={() => (aiPanelOpen = false)}
+          {pendingQuote}
+          onConsumedPendingQuote={() => (pendingQuote = null)}
+        />
+      {:else}
+        <div class="empty-placeholder" role="status">
+          <Spinner size={20} />
+          <p>Loading AI panel…</p>
+        </div>
+      {/if}
+    </aside>
+  {:else}
+    <aside class="pane ai-pane ai-rail">
+      <button
+        class="ai-rail-toggle"
+        type="button"
+        aria-label="Open AI panel"
+        title="Open AI panel"
+        onclick={() => (aiPanelOpen = true)}
+      >
+        <span class="ai-rail-chevron"><Icon name="chevron-left" size={14} /></span>
+        <span class="ai-rail-label">AI</span>
+      </button>
+    </aside>
+  {/if}
 </div>
 
 <style>
   .layout {
     display: grid;
-    grid-template-columns: 200px 1fr 1fr;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: 220px 6px 270px 6px 500px 6px 400px;
     height: 100vh;
+    height: 100dvh;
+    min-height: 0;
     width: 100%;
+    overflow: hidden;
+    background: var(--color-bg-secondary);
+    transition: grid-template-columns var(--transition-layout);
+  }
+
+  .layout.no-transition {
+    transition: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .layout {
+      transition: none;
+    }
   }
 
   .pane {
@@ -138,12 +674,106 @@
     overflow-y: auto;
   }
 
-  .timeline-pane {
+  .settings-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: calc(100% - 16px);
+    margin: 8px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--color-text-secondary);
+    font: inherit;
+    font-size: 0.85em;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .settings-button:hover {
+    border-color: var(--color-border);
     background: var(--color-bg);
+    color: var(--color-text);
+  }
+
+  .posts-pane {
+    background: var(--color-bg-secondary);
     border-right: 1px solid var(--color-border);
   }
 
-  .detail-pane {
+  .reader-pane {
+    overflow: hidden;
     background: var(--color-bg);
+    container-type: inline-size;
+  }
+
+  .ai-pane {
+    overflow: hidden;
+    grid-column: 7 / 8;
+  }
+
+  .ai-rail {
+    background: var(--color-bg-secondary);
+    border-left: 1px solid var(--color-border);
+  }
+
+  .ai-rail-toggle {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-tertiary);
+    font: inherit;
+    cursor: pointer;
+    transition:
+      background-color var(--transition),
+      color var(--transition);
+  }
+
+  .ai-rail-toggle:hover {
+    background: var(--color-hover-bg);
+    color: var(--color-accent);
+  }
+
+  .ai-rail-chevron {
+    display: flex;
+    align-items: center;
+  }
+
+  .ai-rail-label {
+    font-size: 0.62em;
+    font-weight: 650;
+    letter-spacing: 0.06em;
+  }
+
+  .ai-resize-handle {
+    grid-column: 6 / 7;
+  }
+
+  .sidebar-resize-handle {
+    grid-column: 2 / 3;
+  }
+
+  .resize-handle {
+    position: relative;
+    z-index: 1;
+    width: 6px;
+    height: 100%;
+    background: var(--color-bg-secondary);
+    transition: background-color var(--transition);
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .resize-handle:hover,
+  .resize-handle:focus-visible {
+    background: var(--color-accent);
+    outline: none;
   }
 </style>
