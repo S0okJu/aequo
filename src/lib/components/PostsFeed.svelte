@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import FeedContent from './FeedContent.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import Spinner from './Spinner.svelte';
+  import { formatDateTime, formatDayHeading, formatRelative, shortFeedTitle } from '$lib/format';
   import type { FeedFolder, FeedSummary, Item } from '$lib/types';
 
   interface Props {
@@ -66,16 +68,19 @@
     return feeds.find((feed) => feed.id === feedId);
   }
 
-  function formatTime(unixSecs: number): string {
-    return new Date(unixSecs * 1000).toLocaleString(undefined, {
-      dateStyle: 'short',
-      timeStyle: 'short',
-    });
-  }
+  // Shared clock for the relative timestamps ("5 min. ago"), ticking once a
+  // minute so they don't go stale while the list stays open.
+  let nowSecs = $state(Date.now() / 1000);
+  onMount(() => {
+    const timer = setInterval(() => (nowSecs = Date.now() / 1000), 60_000);
+    return () => clearInterval(timer);
+  });
 
   function handleScroll(event: Event) {
     const element = event.currentTarget as HTMLDivElement;
-    if (element.scrollTop + element.clientHeight >= element.scrollHeight - 500) onEndReached();
+    if (hasMore && element.scrollTop + element.clientHeight >= element.scrollHeight - 500) {
+      onEndReached();
+    }
   }
 </script>
 
@@ -84,7 +89,7 @@
     <div class="feed-context">
       <span class="feed-context-label">{viewLabel}</span>
       <strong>{viewTitle}</strong>
-      {#if unreadInView > 0}<span class="unread-pill">{unreadInView} unread</span>{/if}
+      {#if unreadInView > 0}<span class="unread-count">{unreadInView} unread</span>{/if}
     </div>
     {#if loading && items.length === 0}
       <div class="empty-placeholder">
@@ -108,16 +113,10 @@
         {@const day = new Date(item.publishedAt * 1000)}
         {@const previous = index > 0 ? new Date(items[index - 1].publishedAt * 1000) : null}
         {#if !previous || day.toDateString() !== previous.toDateString()}
-          <h2 class="date-heading">
-            {day.toLocaleDateString(undefined, {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric',
-            })}
-          </h2>
+          <h2 class="date-heading">{formatDayHeading(item.publishedAt, nowSecs)}</h2>
         {/if}
         {@const feed = feedFor(item.feedId)}
+        {@const feedName = shortFeedTitle(feed?.title, feed?.url ?? 'Unknown feed')}
         <div
           class="post"
           class:selected={selectedItemId === item.id}
@@ -136,25 +135,28 @@
           }}
         >
           <span class="post-header">
-            <span class="avatar" aria-hidden="true">
-              {(feed?.title ?? feed?.url ?? '?').slice(0, 1).toUpperCase()}
-            </span>
-            <span class="byline">
-              <span class="source">{feed?.title ?? feed?.url ?? 'Unknown feed'}</span>
-              <time datetime={new Date(item.publishedAt * 1000).toISOString()}>
-                {formatTime(item.publishedAt)}
-              </time>
-            </span>
-            {#if !item.isRead}<span class="unread-dot" aria-label="Unread"></span>{/if}
+            <!-- Stand-in until feed favicons land (UI8). -->
+            <span class="feed-initial" aria-hidden="true">{feedName.slice(0, 1).toUpperCase()}</span
+            >
+            <span class="source">{feedName}</span>
+            <span class="separator" aria-hidden="true">·</span>
+            <time
+              datetime={new Date(item.publishedAt * 1000).toISOString()}
+              title={formatDateTime(item.publishedAt)}
+            >
+              {formatRelative(item.publishedAt, nowSecs)}
+            </time>
+            {#if !item.isRead}<span class="visually-hidden">Unread</span>{/if}
             <button
               class="save-button"
+              class:saved={item.isSaved}
               type="button"
               aria-label={item.isSaved ? 'Unsave post' : 'Save post'}
               title={item.isSaved ? 'Saved' : 'Save'}
               onclick={(event) => {
                 event.stopPropagation();
                 onToggleSaved(item.id);
-              }}><Icon name={item.isSaved ? 'star' : 'star-outline'} size={15} /></button
+              }}><Icon name={item.isSaved ? 'star' : 'star-outline'} size={14} /></button
             >
           </span>
           <span class="title">{item.title ?? '(untitled)'}</span>
@@ -165,9 +167,6 @@
           />
         </div>
       {/each}
-      {#if hasMore}
-        <p class="loading-more">Scroll for more</p>
-      {/if}
     {/if}
   </div>
 </div>
@@ -185,7 +184,7 @@
     flex-direction: column;
     max-width: var(--pane-content-max-width);
     margin: 0 auto;
-    padding: 10px;
+    padding: var(--space-2) var(--space-2) var(--space-5);
   }
 
   .posts > .empty-placeholder {
@@ -194,103 +193,75 @@
 
   .feed-context {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 2px 2px 12px;
-    padding: 4px 3px 10px;
-    border-bottom: 1px solid var(--color-border);
+    align-items: baseline;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3) var(--space-3);
   }
   .feed-context-label {
     flex-shrink: 0;
     color: var(--color-text-tertiary);
-    font-size: 0.68em;
-    font-weight: 700;
-    letter-spacing: 0.07em;
+    font-size: var(--text-caption);
+    font-weight: var(--weight-bold);
+    letter-spacing: 0.06em;
   }
   .feed-context strong {
     min-width: 0;
     flex: 1;
     overflow: hidden;
-    color: var(--color-text-secondary);
-    font-size: 0.82em;
-    font-weight: 600;
+    color: var(--color-text);
+    font-size: var(--text-title);
+    font-weight: var(--weight-bold);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .unread-pill {
+  .unread-count {
     flex-shrink: 0;
-    padding: 2px 8px;
-    border-radius: var(--radius-pill);
-    background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg));
-    color: var(--color-accent);
-    font-size: 0.72em;
-    font-weight: 650;
+    color: var(--color-text-tertiary);
+    font-size: var(--text-small);
   }
 
+  .date-heading {
+    margin: var(--space-4) var(--space-3) var(--space-1);
+    color: var(--color-text-tertiary);
+    font-size: var(--text-small);
+    font-weight: var(--weight-medium);
+    content-visibility: auto;
+    contain-intrinsic-size: 0 32px;
+    contain-intrinsic-size: auto 32px;
+  }
+
+  /* A flat row separated by a hairline instead of a bordered card - the
+     unread state is carried by title weight, not a colored dot. */
   .post {
+    position: relative;
     display: block;
     width: 100%;
-    margin-bottom: 8px;
-    padding: 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    background: var(--color-bg);
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
     color: var(--color-text);
     font: inherit;
     text-align: left;
     cursor: pointer;
-    transition:
-      background-color var(--transition),
-      border-color var(--transition);
-    /* Skip layout/style/paint for off-screen cards (variable height, so no
+    transition: background-color var(--transition);
+    /* Skip layout/style/paint for off-screen rows (variable height, so no
        JS windowing - see docs/IMPLEMENTATION_PLAN.md perf notes) instead of
-       mounting every loaded post at once. 230px is only a guess used before
-       a card has ever been laid out; `auto` tells engines that support it
-       (current WebKit/Chromium/Gecko) to remember each card's real height
-       once measured, instead of always using the guess - without this, the
-       guess vs. real-height mismatch understates/overstates scrollHeight
-       and leaves stray blank space once you scroll to the true end. The
-       bare-length line is a no-op fallback for older engines that don't
-       parse the `auto <length>` syntax: an unparseable `auto` declaration
-       is dropped, leaving this one in effect (unchanged old behavior, not
-       a regression there). */
+       mounting every loaded post at once. 110px is only a guess used before
+       a row has ever been laid out; `auto` tells engines that support it
+       to remember each row's real height once measured. The bare-length
+       line is a fallback for engines that don't parse `auto <length>`. */
     content-visibility: auto;
-    contain-intrinsic-size: 0 230px;
-    contain-intrinsic-size: auto 230px;
+    contain-intrinsic-size: 0 110px;
+    contain-intrinsic-size: auto 110px;
   }
 
-  .date-heading {
-    margin: 20px 3px 9px;
-    color: var(--color-text-secondary);
-    font-size: 0.78em;
-    font-weight: 700;
-    content-visibility: auto;
-    contain-intrinsic-size: 0 40px;
-    contain-intrinsic-size: auto 40px;
-  }
-
-  .post:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
-  }
-
-  .save-button {
-    display: inline-flex;
-    align-items: center;
-    border: 0;
-    background: transparent;
-    color: var(--color-text-tertiary);
-    cursor: pointer;
-  }
-  .save-button {
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    flex-shrink: 0;
-    border-radius: var(--radius-sm);
-  }
-  .save-button:hover {
-    color: var(--color-accent);
+  .post + .post::before {
+    position: absolute;
+    top: 0;
+    right: var(--space-3);
+    left: var(--space-3);
+    height: 1px;
+    background: var(--color-border);
+    content: '';
   }
 
   .post:hover {
@@ -298,85 +269,117 @@
   }
 
   .post.selected {
-    border-color: var(--color-accent);
     background: var(--color-selection-bg);
   }
 
-  .post.unread .title {
-    font-weight: 650;
+  /* Hide the hairline on either side of a highlighted row so the hover /
+     selection fill reads as one shape. */
+  .post:hover::before,
+  .post.selected::before,
+  .post:hover + .post::before,
+  .post.selected + .post::before {
+    display: none;
+  }
+
+  .post:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
   }
 
   .post-header {
     display: flex;
     align-items: center;
-    gap: 8px;
-    width: 100%;
-    margin-bottom: 8px;
+    gap: 6px;
+    min-width: 0;
+    height: 20px;
+    margin-bottom: var(--space-1);
+    color: var(--color-text-tertiary);
+    font-size: var(--text-small);
   }
 
-  .avatar {
+  .feed-initial {
     display: grid;
     flex-shrink: 0;
-    width: 27px;
-    height: 27px;
+    width: 16px;
+    height: 16px;
     place-items: center;
-    border-radius: 50%;
-    background: var(--color-bg-secondary);
+    border-radius: var(--radius-xs);
+    background: var(--color-border);
     color: var(--color-text-secondary);
-    font-size: 0.76em;
-    font-weight: 650;
-  }
-
-  .byline {
-    display: flex;
-    min-width: 0;
-    flex: 1;
-    flex-direction: column;
+    font-size: var(--text-caption);
+    font-weight: var(--weight-bold);
   }
 
   .source {
+    min-width: 0;
     overflow: hidden;
     color: var(--color-text-secondary);
-    font-size: 0.75em;
-    font-weight: 600;
+    font-weight: var(--weight-medium);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
+  .separator,
   time {
-    color: var(--color-text-tertiary);
-    font-size: 0.7em;
+    flex-shrink: 0;
   }
 
-  .unread-dot {
-    width: 7px;
-    height: 7px;
+  .save-button {
+    display: inline-flex;
+    width: 24px;
+    height: 24px;
     flex-shrink: 0;
-    border-radius: 50%;
-    background: var(--color-accent);
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-tertiary);
+    cursor: pointer;
+    opacity: 0;
+  }
+
+  /* Only a saved post shows its star at rest; others reveal it on hover or
+     keyboard focus so the control stays reachable. */
+  .save-button.saved,
+  .post:hover .save-button,
+  .post:focus-within .save-button,
+  .post.selected .save-button {
+    opacity: 1;
+  }
+
+  .save-button:hover,
+  .save-button.saved {
+    color: var(--color-accent);
   }
 
   .title {
     display: block;
     display: -webkit-box;
-    margin-bottom: 6px;
+    margin-bottom: 2px;
     overflow: hidden;
-    font-size: 1em;
-    font-weight: 650;
+    color: var(--color-text-secondary);
+    font-size: var(--text-title);
+    font-weight: var(--weight-regular);
     line-height: 1.4;
     word-break: keep-all;
-    line-clamp: 3;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
   }
 
-  .loading-more {
-    font-size: 0.8em;
+  .post.unread .title {
+    color: var(--color-text);
+    font-weight: var(--weight-bold);
   }
 
-  .loading-more {
-    padding: 10px;
-    color: var(--color-text-tertiary);
-    text-align: center;
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 </style>

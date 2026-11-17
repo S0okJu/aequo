@@ -105,9 +105,30 @@ describe('PostsFeed', () => {
     const posts = container.querySelectorAll('.post');
     expect(within(posts[0] as HTMLElement).getByText('Newest first')).toBeTruthy();
     expect(posts[0].classList.contains('unread')).toBe(true);
-    expect(within(posts[0] as HTMLElement).getByLabelText('Unread')).toBeTruthy();
+    expect(within(posts[0] as HTMLElement).getByText('Unread')).toBeTruthy();
     expect(within(posts[1] as HTMLElement).getByText('Older second')).toBeTruthy();
     expect(posts[1].classList.contains('unread')).toBe(false);
-    expect(within(posts[1] as HTMLElement).queryByLabelText('Unread')).toBeNull();
+    expect(within(posts[1] as HTMLElement).queryByText('Unread')).toBeNull();
+  });
+
+  it('shortens tagged feed names and shows a full timestamp on hover', () => {
+    const { container } = render(PostsFeed, {
+      props: {
+        items: [items[0]],
+        feeds: [{ ...feeds[0], title: 'Daily | News, Notes, and More' }],
+        folders: [],
+        selectedFeedId: null,
+        selectedFolderId: null,
+        selectedItemId: null,
+        hasMore: false,
+        onSelect: vi.fn(),
+        onToggleSaved: vi.fn(),
+        onEndReached: vi.fn(),
+      },
+    });
+
+    const post = container.querySelector('.post') as HTMLElement;
+    expect(within(post).getByText('Daily')).toBeTruthy();
+    expect(post.querySelector('time')?.getAttribute('title')).toBeTruthy();
   });
 });
