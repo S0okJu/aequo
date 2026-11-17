@@ -20,6 +20,17 @@
           />
         </span>
         <p>{toast.message}</p>
+        {#if toast.action}
+          {@const action = toast.action}
+          <button
+            type="button"
+            class="toast-action"
+            onclick={() => {
+              dismissToast(toast.id);
+              action.run();
+            }}>{action.label}</button
+          >
+        {/if}
         <button
           type="button"
           class="toast-dismiss"
@@ -84,6 +95,23 @@
     color: var(--color-text);
     font-size: var(--text-small);
     line-height: 1.4;
+  }
+
+  .toast-action {
+    flex: 0 0 auto;
+    padding: 2px var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-accent);
+    font: inherit;
+    font-size: var(--text-small);
+    font-weight: var(--weight-bold);
+    cursor: pointer;
+  }
+
+  .toast-action:hover {
+    background: var(--color-hover-bg);
   }
 
   .toast-dismiss {

@@ -40,6 +40,38 @@ const feeds: FeedSummary[] = [
 ];
 
 describe('FeedList', () => {
+  const baseProps = {
+    folders: [],
+    selectedFolderId: null,
+    onSelectFeed: vi.fn(),
+    onSelectFolder: vi.fn(),
+    onManageFolders: vi.fn(),
+    onMoveFeed: vi.fn(),
+  };
+
+  it('hides feeds with nothing unread in unread-only mode, except the selected one', async () => {
+    const { rerender } = render(FeedList, {
+      props: { ...baseProps, feeds, selectedFeedId: null, unreadOnly: true },
+    });
+    expect(screen.getByRole('button', { name: /One\s*2/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Two' })).toBeNull();
+
+    await rerender({ ...baseProps, feeds, selectedFeedId: 2, unreadOnly: true });
+    expect(screen.getByRole('button', { name: 'Two' })).toBeTruthy();
+  });
+
+  it('says so when every feed is read in unread-only mode', () => {
+    render(FeedList, {
+      props: {
+        ...baseProps,
+        feeds: feeds.map((feed) => ({ ...feed, unreadCount: 0 })),
+        selectedFeedId: null,
+        unreadOnly: true,
+      },
+    });
+    expect(screen.getByText('All caught up')).toBeTruthy();
+  });
+
   it('shows aggregate and per-feed unread counts', () => {
     render(FeedList, {
       props: {

@@ -1,11 +1,12 @@
 //! Repository functions: the only way the rest of the app touches the
 //! `feeds`/`items` tables (see docs/ARCHITECTURE.md §3.1, §6).
 
-use rusqlite::{Connection, OptionalExtension, Result, params};
+use rusqlite::types::Value;
+use rusqlite::{Connection, OptionalExtension, Result, params, params_from_iter};
 
 use super::models::{
     AiSession, Annotation, ArticleCache, CleanupPreview, CleanupResult, Feed, FeedFolder, FeedMeta,
-    Item, NewItem, RetentionSettings,
+    Item, ItemCursor, ItemFilter, NewItem, RetentionSettings,
 };
 
 fn row_to_article_cache(row: &rusqlite::Row) -> rusqlite::Result<ArticleCache> {
@@ -314,9 +315,8 @@ pub fn guid_hashes_with_full_content(
     conn: &Connection,
     feed_id: i64,
 ) -> Result<std::collections::HashSet<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT guid_hash FROM items WHERE feed_id = ?1 AND full_content IS NOT NULL",
-    )?;
+    let mut stmt = conn
+        .prepare("SELECT guid_hash FROM items WHERE feed_id = ?1 AND full_content IS NOT NULL")?;
     let rows = stmt.query_map([feed_id], |row| row.get::<_, String>(0))?;
     rows.collect()
 }
@@ -414,68 +414,81 @@ pub fn delete_ai_session(conn: &Connection, session_id: i64) -> Result<bool> {
     Ok(conn.execute("DELETE FROM ai_sessions WHERE id = ?1", params![session_id])? > 0)
 }
 
-/// Lists items merged across all feeds, newest first (§6.3).
-/// Lists items for the merged timeline, newest first (§6.3). `feed_id`
-/// narrows to one feed (the sidebar's per-feed selection); `None` is
-/// the default "All" view across every feed.
-pub fn list_items(
-    conn: &Connection,
-    limit: i64,
-    cursor_published_at: Option<i64>,
-    cursor_id: Option<i64>,
-    unread_only: bool,
-    feed_id: Option<i64>,
-    folder_id: Option<i64>,
-    saved_only: bool,
-) -> Result<Vec<Item>> {
-    let mut conditions: Vec<&str> = Vec::new();
-    let mut sql_params: Vec<&dyn rusqlite::ToSql> = Vec::new();
+/// SQL conditions (joined with AND) and their positional values for an
+/// `ItemFilter`. Shared by listing and bulk updates so both always cover
+/// the same rows.
+fn filter_conditions(filter: &ItemFilter) -> (Vec<&'static str>, Vec<Value>) {
+    let mut conditions = Vec::new();
+    let mut values = Vec::new();
 
-    if unread_only {
+    if filter.unread_only {
         conditions.push("is_read = 0");
     }
-    if saved_only {
+    if filter.saved_only {
         conditions.push("is_saved = 1");
     }
-    if let Some(ref id) = feed_id {
+    if let Some(id) = filter.feed_id {
         conditions.push("feed_id = ?");
-        sql_params.push(id);
-    } else if let Some(ref id) = folder_id {
+        values.push(Value::Integer(id));
+    } else if let Some(id) = filter.folder_id {
         conditions.push("feed_id IN (SELECT id FROM feeds WHERE folder_id = ?)");
-        sql_params.push(id);
-    } else if !saved_only {
+        values.push(Value::Integer(id));
+    } else if !filter.saved_only {
         // The Starred view spans every feed, including ones hidden
         // from "All" - a feed being decluttered from the merged
         // timeline shouldn't also hide items the user explicitly
         // starred from it.
         conditions.push("feed_id IN (SELECT id FROM feeds WHERE hidden_from_all = 0)");
     }
+    if let Some(from) = filter.published_from {
+        conditions.push("published_at >= ?");
+        values.push(Value::Integer(from));
+    }
+    if let Some(to) = filter.published_to {
+        conditions.push("published_at < ?");
+        values.push(Value::Integer(to));
+    }
+    (conditions, values)
+}
+
+fn where_clause(conditions: &[&str]) -> String {
+    if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    }
+}
+
+/// Lists items for the merged timeline, newest first (§6.3), narrowed by
+/// `filter` (one feed, one folder, starred, unread, a day range). An empty
+/// filter is the default "All" view across every non-hidden feed.
+pub fn list_items(
+    conn: &Connection,
+    filter: &ItemFilter,
+    limit: i64,
+    cursor: Option<ItemCursor>,
+) -> Result<Vec<Item>> {
+    let (mut conditions, mut values) = filter_conditions(filter);
 
     // Keyset pagination on (published_at, id) rather than OFFSET: an
     // OFFSET is a position in a result set that background fetches keep
     // mutating mid-scroll, which drifts into skipped/duplicated rows.
     // "Strictly older than the last row we handed out" stays correct no
     // matter how many rows are inserted between pages.
-    if let (Some(cp), Some(cid)) = (&cursor_published_at, &cursor_id) {
+    if let Some(cursor) = cursor {
         conditions.push("(published_at < ? OR (published_at = ? AND id < ?))");
-        sql_params.push(cp);
-        sql_params.push(cp);
-        sql_params.push(cid);
+        values.push(Value::Integer(cursor.published_at));
+        values.push(Value::Integer(cursor.published_at));
+        values.push(Value::Integer(cursor.id));
     }
-
-    let where_clause = if conditions.is_empty() {
-        String::new()
-    } else {
-        format!("WHERE {}", conditions.join(" AND "))
-    };
-
-    sql_params.push(&limit);
+    values.push(Value::Integer(limit));
 
     let sql = format!(
-        "SELECT {ITEM_LIST_COLUMNS} FROM items {where_clause} ORDER BY published_at DESC, id DESC LIMIT ?"
+        "SELECT {ITEM_LIST_COLUMNS} FROM items {} ORDER BY published_at DESC, id DESC LIMIT ?",
+        where_clause(&conditions)
     );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(sql_params.as_slice(), row_to_item)?;
+    let rows = stmt.query_map(params_from_iter(values), row_to_item)?;
     rows.collect()
 }
 
@@ -487,12 +500,43 @@ pub fn mark_read(conn: &Connection, item_id: i64, now: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn mark_feed_read(conn: &Connection, feed_id: i64, now: i64) -> Result<()> {
-    conn.execute(
-        "UPDATE items SET is_read = 1, read_at = COALESCE(read_at, ?2) WHERE feed_id = ?1",
-        params![feed_id, now],
-    )?;
-    Ok(())
+/// "Mark all as read" for a view: every unread item matching `filter` that
+/// was already fetched at `fetched_before` (when the view was loaded), so
+/// posts that arrived after the user looked are left unread. Returns the
+/// affected ids so the action can be undone with [`mark_items_unread`].
+pub fn mark_items_read(
+    conn: &Connection,
+    filter: &ItemFilter,
+    fetched_before: i64,
+    now: i64,
+) -> Result<Vec<i64>> {
+    let (mut conditions, mut values) = filter_conditions(filter);
+    conditions.push("is_read = 0");
+    conditions.push("fetched_at <= ?");
+    values.push(Value::Integer(fetched_before));
+    values.insert(0, Value::Integer(now));
+
+    let sql = format!(
+        "UPDATE items SET is_read = 1, read_at = COALESCE(read_at, ?) {} RETURNING id",
+        where_clause(&conditions)
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let ids = stmt.query_map(params_from_iter(values), |row| row.get(0))?;
+    ids.collect()
+}
+
+/// Puts items back to unread - the undo for [`mark_items_read`].
+pub fn mark_items_unread(conn: &Connection, item_ids: &[i64]) -> Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    let mut changed = 0;
+    {
+        let mut stmt = tx.prepare("UPDATE items SET is_read = 0, read_at = NULL WHERE id = ?1")?;
+        for id in item_ids {
+            changed += stmt.execute(params![id])?;
+        }
+    }
+    tx.commit()?;
+    Ok(changed)
 }
 
 pub fn set_item_saved(conn: &Connection, item_id: i64, saved: bool) -> Result<bool> {
@@ -767,7 +811,7 @@ mod tests {
         let second_pass = upsert_items(&conn, feed_id, &[sample_item("guid-1")]).unwrap();
         assert_eq!(second_pass, 0);
 
-        let items = list_items(&conn, 10, None, None, false, None, None, false).unwrap();
+        let items = list_items(&conn, &ItemFilter::default(), 10, None).unwrap();
         assert_eq!(items.len(), 1);
     }
 
@@ -803,12 +847,74 @@ mod tests {
 
         assert_eq!(count_unread(&conn, feed_id).unwrap(), 2);
 
-        let items = list_items(&conn, 10, None, None, false, None, None, false).unwrap();
+        let items = list_items(&conn, &ItemFilter::default(), 10, None).unwrap();
         mark_read(&conn, items[0].id, 1_700_000_200).unwrap();
         assert_eq!(count_unread(&conn, feed_id).unwrap(), 1);
 
-        mark_feed_read(&conn, feed_id, 1_700_000_300).unwrap();
+        let filter = ItemFilter {
+            feed_id: Some(feed_id),
+            ..Default::default()
+        };
+        mark_items_read(&conn, &filter, 1_700_000_100, 1_700_000_300).unwrap();
         assert_eq!(count_unread(&conn, feed_id).unwrap(), 0);
+    }
+
+    #[test]
+    fn mark_items_read_covers_the_view_and_returns_ids_for_undo() {
+        let conn = init_in_memory().unwrap();
+        let shown = insert_feed(&conn, "https://a.example/feed.xml", None, None, 0).unwrap();
+        let hidden = insert_feed(&conn, "https://b.example/feed.xml", None, None, 0).unwrap();
+        update_feed_organization(&conn, hidden, None, true).unwrap();
+        upsert_items(&conn, shown, &[sample_item("a1"), sample_item("a2")]).unwrap();
+        upsert_items(&conn, hidden, &[sample_item("b1")]).unwrap();
+        // Arrived after the user loaded the view: must stay unread.
+        let late = NewItem {
+            fetched_at: 1_700_000_500,
+            ..sample_item("a3")
+        };
+        upsert_items(&conn, shown, &[late]).unwrap();
+
+        let ids =
+            mark_items_read(&conn, &ItemFilter::default(), 1_700_000_100, 1_700_000_600).unwrap();
+        assert_eq!(
+            ids.len(),
+            2,
+            "only the shown feed's items fetched before the view loaded"
+        );
+        assert_eq!(count_unread(&conn, shown).unwrap(), 1);
+        assert_eq!(
+            count_unread(&conn, hidden).unwrap(),
+            1,
+            "All excludes hidden feeds"
+        );
+
+        assert_eq!(mark_items_unread(&conn, &ids).unwrap(), 2);
+        assert_eq!(count_unread(&conn, shown).unwrap(), 3);
+    }
+
+    #[test]
+    fn list_items_filters_by_published_range() {
+        let conn = init_in_memory().unwrap();
+        let feed_id = insert_feed(&conn, "https://example.com/feed.xml", None, None, 0).unwrap();
+        let at = |guid: &str, published_at: i64| NewItem {
+            published_at,
+            ..sample_item(guid)
+        };
+        upsert_items(
+            &conn,
+            feed_id,
+            &[at("old", 100), at("today", 200), at("tomorrow", 300)],
+        )
+        .unwrap();
+
+        let filter = ItemFilter {
+            published_from: Some(200),
+            published_to: Some(300),
+            ..Default::default()
+        };
+        let items = list_items(&conn, &filter, 10, None).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].guid_hash, "today");
     }
 
     #[test]
@@ -822,10 +928,19 @@ mod tests {
         )
         .unwrap();
 
-        let all_items = list_items(&conn, 10, None, None, false, None, None, false).unwrap();
+        let all_items = list_items(&conn, &ItemFilter::default(), 10, None).unwrap();
         mark_read(&conn, all_items[0].id, 1_700_000_200).unwrap();
 
-        let unread_items = list_items(&conn, 10, None, None, true, None, None, false).unwrap();
+        let unread_items = list_items(
+            &conn,
+            &ItemFilter {
+                unread_only: true,
+                ..Default::default()
+            },
+            10,
+            None,
+        )
+        .unwrap();
         assert_eq!(unread_items.len(), 1);
         assert!(!unread_items[0].is_read);
     }
@@ -843,20 +958,48 @@ mod tests {
         .unwrap();
         upsert_items(&conn, feed_b, &[sample_item("guid-b1")]).unwrap();
 
-        let all_items = list_items(&conn, 10, None, None, false, None, None, false).unwrap();
+        let all_items = list_items(&conn, &ItemFilter::default(), 10, None).unwrap();
         assert_eq!(all_items.len(), 3);
 
-        let feed_a_items = list_items(&conn, 10, None, None, false, Some(feed_a), None, false).unwrap();
+        let feed_a_items = list_items(
+            &conn,
+            &ItemFilter {
+                feed_id: Some(feed_a),
+                ..Default::default()
+            },
+            10,
+            None,
+        )
+        .unwrap();
         assert_eq!(feed_a_items.len(), 2);
         assert!(feed_a_items.iter().all(|item| item.feed_id == feed_a));
 
-        let feed_b_items = list_items(&conn, 10, None, None, false, Some(feed_b), None, false).unwrap();
+        let feed_b_items = list_items(
+            &conn,
+            &ItemFilter {
+                feed_id: Some(feed_b),
+                ..Default::default()
+            },
+            10,
+            None,
+        )
+        .unwrap();
         assert_eq!(feed_b_items.len(), 1);
 
         // Combined with unread_only: mark one of feed_a's items read,
         // confirm the filters compose (WHERE ... AND ...).
         mark_read(&conn, feed_a_items[0].id, 1_700_000_200).unwrap();
-        let feed_a_unread = list_items(&conn, 10, None, None, true, Some(feed_a), None, false).unwrap();
+        let feed_a_unread = list_items(
+            &conn,
+            &ItemFilter {
+                unread_only: true,
+                feed_id: Some(feed_a),
+                ..Default::default()
+            },
+            10,
+            None,
+        )
+        .unwrap();
         assert_eq!(feed_a_unread.len(), 1);
     }
 
@@ -870,8 +1013,12 @@ mod tests {
         upsert_items(&conn, visible_feed, &[sample_item("guid-a1")]).unwrap();
         upsert_items(&conn, hidden_feed, &[sample_item("guid-b1")]).unwrap();
 
-        let all_items = list_items(&conn, 10, None, None, false, None, None, false).unwrap();
-        assert_eq!(all_items.len(), 1, "hidden feed is excluded from the default view");
+        let all_items = list_items(&conn, &ItemFilter::default(), 10, None).unwrap();
+        assert_eq!(
+            all_items.len(),
+            1,
+            "hidden feed is excluded from the default view"
+        );
 
         let starred_item = all_items
             .iter()
@@ -879,11 +1026,29 @@ mod tests {
             .unwrap();
         // Star the hidden feed's item too, not the visible one, to prove
         // the Starred view ignores hidden_from_all entirely.
-        let hidden_item_id =
-            list_items(&conn, 10, None, None, false, Some(hidden_feed), None, false).unwrap()[0].id;
+        let hidden_item_id = list_items(
+            &conn,
+            &ItemFilter {
+                feed_id: Some(hidden_feed),
+                ..Default::default()
+            },
+            10,
+            None,
+        )
+        .unwrap()[0]
+            .id;
         set_item_saved(&conn, hidden_item_id, true).unwrap();
 
-        let starred = list_items(&conn, 10, None, None, false, None, None, true).unwrap();
+        let starred = list_items(
+            &conn,
+            &ItemFilter {
+                saved_only: true,
+                ..Default::default()
+            },
+            10,
+            None,
+        )
+        .unwrap();
         assert_eq!(starred.len(), 1);
         assert_eq!(starred[0].id, hidden_item_id);
         assert!(starred[0].is_saved);
@@ -1007,7 +1172,7 @@ mod tests {
     fn sample_item_id(conn: &Connection) -> i64 {
         let feed_id = insert_feed(&conn, "https://example.com/feed.xml", None, None, 0).unwrap();
         upsert_items(conn, feed_id, &[sample_item("guid-1")]).unwrap();
-        list_items(conn, 10, None, None, false, None, None, false).unwrap()[0].id
+        list_items(conn, &ItemFilter::default(), 10, None).unwrap()[0].id
     }
 
     #[test]

@@ -298,7 +298,7 @@ mod tests {
         // `db::list_items` deliberately nulls `full_content` for list
         // views (payload-size optimization) - fetch each item by id to
         // see the real stored value.
-        let list = db::list_items(&conn, 10, None, None, false, None, None, false).unwrap();
+        let list = db::list_items(&conn, &db::ItemFilter::default(), 10, None).unwrap();
         assert_eq!(list.len(), 2);
         for summary in &list {
             let full = db::get_item_by_id(&conn, summary.id).unwrap().unwrap();

@@ -1,6 +1,29 @@
 //! Row types for the `feeds` and `items` tables (see docs/ARCHITECTURE.md §5).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+/// Which items a timeline view covers - shared by `list_items` and the bulk
+/// read/unread commands so "mark all read" always acts on exactly what the
+/// current view lists. Every field is optional on the wire (`default`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ItemFilter {
+    pub unread_only: bool,
+    pub saved_only: bool,
+    pub feed_id: Option<i64>,
+    pub folder_id: Option<i64>,
+    /// Inclusive lower / exclusive upper bound on `published_at` (the
+    /// Today view).
+    pub published_from: Option<i64>,
+    pub published_to: Option<i64>,
+}
+
+/// Keyset pagination position: "strictly older than this row".
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ItemCursor {
+    pub published_at: i64,
+    pub id: i64,
+}
 
 /// `Feed`/`Item` derive `Serialize` since they cross the Tauri IPC
 /// boundary as-is from the M6 query commands (list_feeds/list_items)

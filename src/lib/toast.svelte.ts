@@ -1,9 +1,16 @@
 export type ToastType = 'success' | 'error' | 'info';
 
+/** An inline button on the toast (e.g. "Undo"); running it dismisses the toast. */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 export interface Toast {
   id: number;
   type: ToastType;
   message: string;
+  action?: ToastAction;
 }
 
 const DEFAULT_DURATION_MS = 4000;
@@ -26,11 +33,11 @@ const timers: Record<number, ReturnType<typeof setTimeout>> = {};
  */
 export function showToast(
   message: string,
-  opts: { type?: ToastType; durationMs?: number } = {},
+  opts: { type?: ToastType; durationMs?: number; action?: ToastAction } = {},
 ): number {
   const type = opts.type ?? 'info';
   const id = nextId++;
-  toasts.push({ id, type, message });
+  toasts.push({ id, type, message, action: opts.action });
 
   const durationMs = opts.durationMs ?? (type === 'error' ? 0 : DEFAULT_DURATION_MS);
   if (durationMs > 0) {

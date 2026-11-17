@@ -131,4 +131,33 @@ describe('PostsFeed', () => {
     expect(within(post).getByText('Daily')).toBeTruthy();
     expect(post.querySelector('time')?.getAttribute('title')).toBeTruthy();
   });
+
+  it('switches between all/unread and marks the view read from the toolbar', async () => {
+    const onUnreadOnlyChange = vi.fn();
+    const onMarkAllRead = vi.fn();
+    const { getByRole } = render(PostsFeed, {
+      props: {
+        items,
+        feeds,
+        folders: [],
+        selectedFeedId: null,
+        selectedFolderId: null,
+        selectedItemId: null,
+        hasMore: false,
+        unreadCount: 5,
+        onSelect: vi.fn(),
+        onToggleSaved: vi.fn(),
+        onEndReached: vi.fn(),
+        onUnreadOnlyChange,
+        onMarkAllRead,
+      },
+    });
+
+    expect(getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true');
+    await fireEvent.click(getByRole('button', { name: 'Unread' }));
+    expect(onUnreadOnlyChange).toHaveBeenCalledWith(true);
+
+    await fireEvent.click(getByRole('button', { name: 'Mark all as read' }));
+    expect(onMarkAllRead).toHaveBeenCalledOnce();
+  });
 });

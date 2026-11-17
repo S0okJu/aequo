@@ -47,28 +47,18 @@ pub fn list_feeds(db_state: State<'_, Mutex<Connection>>) -> Result<Vec<FeedSumm
 #[tauri::command]
 pub fn list_items(
     db_state: State<'_, Mutex<Connection>>,
+    filter: db::ItemFilter,
     limit: i64,
     cursor_published_at: Option<i64>,
     cursor_id: Option<i64>,
-    unread_only: bool,
-    feed_id: Option<i64>,
-    folder_id: Option<i64>,
-    saved_only: bool,
 ) -> Result<Vec<db::Item>, String> {
     let conn = db_state
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
-    db::list_items(
-        &conn,
-        limit,
-        cursor_published_at,
-        cursor_id,
-        unread_only,
-        feed_id,
-        folder_id,
-        saved_only,
-    )
-    .map_err(|e| e.to_string())
+    let cursor = cursor_published_at
+        .zip(cursor_id)
+        .map(|(published_at, id)| db::ItemCursor { published_at, id });
+    db::list_items(&conn, &filter, limit, cursor).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -79,12 +69,29 @@ pub fn mark_read(db_state: State<'_, Mutex<Connection>>, item_id: i64) -> Result
     db::mark_read(&conn, item_id, now_unix()).map_err(|e| e.to_string())
 }
 
+/// Marks every unread item in a view as read; returns the affected ids for
+/// undo. `fetched_before` is when the frontend loaded the view.
 #[tauri::command]
-pub fn mark_feed_read(db_state: State<'_, Mutex<Connection>>, feed_id: i64) -> Result<(), String> {
+pub fn mark_items_read(
+    db_state: State<'_, Mutex<Connection>>,
+    filter: db::ItemFilter,
+    fetched_before: i64,
+) -> Result<Vec<i64>, String> {
     let conn = db_state
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
-    db::mark_feed_read(&conn, feed_id, now_unix()).map_err(|e| e.to_string())
+    db::mark_items_read(&conn, &filter, fetched_before, now_unix()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn mark_items_unread(
+    db_state: State<'_, Mutex<Connection>>,
+    item_ids: Vec<i64>,
+) -> Result<usize, String> {
+    let conn = db_state
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    db::mark_items_unread(&conn, &item_ids).map_err(|e| e.to_string())
 }
 
 fn now_unix() -> i64 {

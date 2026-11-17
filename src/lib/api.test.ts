@@ -8,6 +8,8 @@ import {
   deleteAnnotation,
   listItemAnnotations,
   listItems,
+  markItemsRead,
+  markItemsUnread,
   markRead,
   updateAnnotation,
 } from './api';
@@ -15,46 +17,41 @@ import {
 describe('Tauri API wrappers', () => {
   beforeEach(() => invoke.mockReset());
 
-  it('forwards timeline filters and paging to the list_items command', async () => {
+  it('forwards the view filter and paging to the list_items command', async () => {
     invoke.mockResolvedValue([]);
-    await listItems(50, { publishedAt: 1_700_000_000, id: 100 }, true, 7);
+    await listItems({ unreadOnly: true, feedId: 7 }, 50, { publishedAt: 1_700_000_000, id: 100 });
 
     expect(invoke).toHaveBeenCalledWith('list_items', {
+      filter: { unreadOnly: true, feedId: 7 },
       limit: 50,
       cursorPublishedAt: 1_700_000_000,
       cursorId: 100,
-      unreadOnly: true,
-      feedId: 7,
-      savedOnly: false,
     });
   });
 
   it('forwards a null cursor for the first page', async () => {
     invoke.mockResolvedValue([]);
-    await listItems(50, null, false, null);
+    await listItems({ savedOnly: true }, 50);
 
     expect(invoke).toHaveBeenCalledWith('list_items', {
+      filter: { savedOnly: true },
       limit: 50,
       cursorPublishedAt: null,
       cursorId: null,
-      unreadOnly: false,
-      feedId: null,
-      savedOnly: false,
     });
   });
 
-  it('forwards savedOnly to the list_items command for the Starred tab', async () => {
-    invoke.mockResolvedValue([]);
-    await listItems(50, null, false, null, undefined, true);
-
-    expect(invoke).toHaveBeenCalledWith('list_items', {
-      limit: 50,
-      cursorPublishedAt: null,
-      cursorId: null,
-      unreadOnly: false,
-      feedId: null,
-      savedOnly: true,
+  it('forwards the view filter and load time to mark_items_read, and ids to undo', async () => {
+    invoke.mockResolvedValue([1, 2]);
+    await expect(markItemsRead({ folderId: 3 }, 1_700_000_000)).resolves.toEqual([1, 2]);
+    expect(invoke).toHaveBeenCalledWith('mark_items_read', {
+      filter: { folderId: 3 },
+      fetchedBefore: 1_700_000_000,
     });
+
+    invoke.mockResolvedValue(2);
+    await markItemsUnread([1, 2]);
+    expect(invoke).toHaveBeenCalledWith('mark_items_unread', { itemIds: [1, 2] });
   });
 
   it('forwards the selected item to mark_read', async () => {

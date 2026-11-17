@@ -23,9 +23,14 @@
     selectedStarred?: boolean;
     selectedItemId: number | null;
     hasMore: boolean;
+    unreadOnly?: boolean;
+    /** Unread total for the whole view (all pages); falls back to the loaded items. */
+    unreadCount?: number;
     onSelect: (itemId: number) => void;
     onToggleSaved: (itemId: number) => void;
     onEndReached: () => void;
+    onUnreadOnlyChange?: (unreadOnly: boolean) => void;
+    onMarkAllRead?: () => void;
   }
 
   let {
@@ -39,9 +44,13 @@
     selectedStarred = false,
     selectedItemId,
     hasMore,
+    unreadOnly = false,
+    unreadCount,
     onSelect,
     onToggleSaved,
     onEndReached,
+    onUnreadOnlyChange,
+    onMarkAllRead,
   }: Props = $props();
 
   const selectedFeed = $derived(feeds.find((feed) => feed.id === selectedFeedId));
@@ -68,7 +77,7 @@
             ? selectedFolder.name
             : 'All posts',
   );
-  const unreadInView = $derived(items.filter((item) => !item.isRead).length);
+  const unreadInView = $derived(unreadCount ?? items.filter((item) => !item.isRead).length);
 
   function feedFor(feedId: number): FeedSummary | undefined {
     return feeds.find((feed) => feed.id === feedId);
@@ -96,6 +105,26 @@
       <span class="feed-context-label">{viewLabel}</span>
       <strong>{viewTitle}</strong>
       {#if unreadInView > 0}<span class="unread-count">{unreadInView} unread</span>{/if}
+      {#if onUnreadOnlyChange && !selectedStarred}
+        <div class="segmented" role="group" aria-label="Show posts">
+          <button type="button" aria-pressed={!unreadOnly} onclick={() => onUnreadOnlyChange(false)}
+            >All</button
+          >
+          <button type="button" aria-pressed={unreadOnly} onclick={() => onUnreadOnlyChange(true)}
+            >Unread</button
+          >
+        </div>
+      {/if}
+      {#if onMarkAllRead}
+        <button
+          type="button"
+          class="toolbar-button"
+          aria-label="Mark all as read"
+          title="Mark all as read"
+          disabled={unreadInView === 0}
+          onclick={onMarkAllRead}><Icon name="check-all" size={15} /></button
+        >
+      {/if}
     </div>
     {#if loading && items.length === 0}
       <div class="empty-placeholder">
@@ -109,6 +138,9 @@
         {#if selectedStarred}
           <h1>No starred posts</h1>
           <p>Star a post to come back to it later - it'll show up here.</p>
+        {:else if unreadOnly}
+          <h1>All caught up</h1>
+          <p>There's nothing unread here. Switch to All to see read posts.</p>
         {:else}
           <h1>No posts yet</h1>
           <p>New posts from your subscriptions will show up here.</p>
@@ -199,7 +231,7 @@
 
   .feed-context {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3) var(--space-3);
   }
@@ -224,6 +256,52 @@
     flex-shrink: 0;
     color: var(--color-text-tertiary);
     font-size: var(--text-small);
+  }
+
+  .segmented {
+    display: inline-flex;
+    flex-shrink: 0;
+    padding: 2px;
+    border-radius: var(--radius-sm);
+    background: var(--color-hover-bg);
+  }
+  .segmented button {
+    padding: 2px var(--space-2);
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--color-text-secondary);
+    font: inherit;
+    font-size: var(--text-small);
+    cursor: pointer;
+  }
+  .segmented button[aria-pressed='true'] {
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-weight: var(--weight-medium);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+
+  .toolbar-button {
+    display: inline-flex;
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+  }
+  .toolbar-button:hover:not(:disabled) {
+    background: var(--color-hover-bg);
+    color: var(--color-text);
+  }
+  .toolbar-button:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   .date-heading {

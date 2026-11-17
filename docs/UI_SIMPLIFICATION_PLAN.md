@@ -595,7 +595,11 @@ Claude Fable 5.2 vs. Fable 5.1: Fewer refusals…
 - §3.13. 토큰 정의 → 컴포넌트별 교체(전후 스크린샷) → lint/grep 검사 추가 → 기존 `--font-size-*` 제거.
 - **UI1보다 먼저 하거나 UI1과 함께 하는 것을 권장한다** — 목록 행을 새로 만들 때 새 토큰을 바로 쓰면 두 번 손대지 않아도 된다.
 
-### UI13. RSS 기본 기능 — [ ]
+### UI13. RSS 기본 기능 — [~] UI13-a(안 읽은 글만 · 모두 읽음) 완료
+- 구현 중 결정됨 (UI13-a): `list_items`의 8개 인자를 `ItemFilter`로 묶어(clippy `too_many_arguments` 해소) 목록·일괄 읽음이 같은 조건 빌더를 쓴다.
+  "모두 읽음"의 기준은 `before_published_at`이 아니라 **`fetched_at <= 목록을 불러온 시각`**이다(뷰를 본 뒤 도착한 글은 발행 시각과 무관하게 제외).
+  Today 뷰는 클라이언트 페이지 루프(최대 20쪽) 대신 `published_from/to` 서버 필터 + 일반 페이지네이션. Starred 뷰에는 안 읽음 토글을 적용하지 않는다(저장한 글은 읽음 여부와 무관하게 유지).
+  안 읽음 모드의 백그라운드 새로고침은 이미 읽은 글을 목록에 남겨 읽던 글이 사라지지 않게 한다. 기존 `mark_feed_read`/`markFeedRead`는 제거.
 - §3.14. 순서: 안 읽은 글만 보기(백엔드 변경 없음) → 모두 읽음 + 실행 취소(`mark_items_read`, `mark_items_unread`) →
   안 읽음 표시(`mark_unread`) → 새로고침 버튼 → 검색(FTS5 trigram 확인 테스트 → `items_fts` + 색인 동기화 + 재색인 → `list_items` `query` → UI).
 - 안 읽은 글만 보기 단계에서 사이드바 숨김 동작(§3.16)도 함께 한다.

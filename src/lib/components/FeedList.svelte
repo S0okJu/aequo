@@ -13,6 +13,8 @@
     selectedFolderId: number | null;
     selectedToday?: boolean;
     selectedStarred?: boolean;
+    /** Unread-only mode: hide feeds/folders with nothing unread (§3.16). */
+    unreadOnly?: boolean;
     onSelectFeed: (feedId: number | null) => void;
     onSelectFolder: (folderId: number | null) => void;
     onSelectToday?: () => void;
@@ -29,6 +31,7 @@
     selectedFolderId,
     selectedToday = false,
     selectedStarred = false,
+    unreadOnly = false,
     onSelectFeed,
     onSelectFolder,
     onSelectToday = () => {},
@@ -60,6 +63,26 @@
     }
     return byFolder;
   });
+
+  // In unread-only mode a feed/folder with nothing unread is hidden - except
+  // the current selection, so finishing its last post doesn't yank it out
+  // of the sidebar; it drops out once the user moves to another view.
+  function showFeed(feed: FeedSummary): boolean {
+    return !unreadOnly || feed.unreadCount > 0 || feed.id === selectedFeedId;
+  }
+  function showFolder(folderId: number): boolean {
+    return (
+      !unreadOnly ||
+      (unreadByFolder[folderId] ?? 0) > 0 ||
+      folderId === selectedFolderId ||
+      (feedsByFolder[folderId] ?? []).some((feed) => feed.id === selectedFeedId)
+    );
+  }
+  const shownFolders = $derived(folders.filter((folder) => showFolder(folder.id)));
+  const shownUnfiledFeeds = $derived(unfiledFeeds.filter(showFeed));
+  const allCaughtUp = $derived(
+    unreadOnly && shownFolders.length === 0 && shownUnfiledFeeds.length === 0,
+  );
 
   let collapsedFolders = new SvelteSet<number>();
   let dragOverTarget = $state<number | 'unfiled' | null>(null);
@@ -197,7 +220,7 @@
       >
     </div>
 
-    {#each folders as folder (folder.id)}
+    {#each shownFolders as folder (folder.id)}
       {@const folderFeeds = feedsByFolder[folder.id] ?? []}
       {@const folderUnread = unreadByFolder[folder.id] ?? 0}
       {@const isCollapsed = collapsedFolders.has(folder.id)}
@@ -230,11 +253,12 @@
             {#if folderFeeds.length === 0}
               <p class="empty-folder-hint">Drop feeds here</p>
             {:else}
-              {#each folderFeeds as feed (feed.id)}
+              {#each folderFeeds.filter(showFeed) as feed (feed.id)}
                 <div class="feed-row">
                   <button
                     class="row nested"
                     class:selected={selectedFeedId === feed.id}
+                    class:quiet={feed.unreadCount === 0}
                     class:dragging={draggingFeedId === feed.id}
                     draggable="true"
                     ondragstart={(event) => handleDragStart(event, feed.id)}
@@ -301,7 +325,9 @@
       </div>
     {/each}
 
-    {#if folders.length > 0 || unfiledFeeds.length > 0}
+    {#if allCaughtUp}
+      <p class="caught-up">All caught up</p>
+    {:else if shownUnfiledFeeds.length > 0 || (folders.length > 0 && !unreadOnly)}
       <div
         class="unfiled-group"
         role="group"
@@ -312,11 +338,12 @@
         ondrop={(event) => handleDrop(event, null)}
       >
         <div class="section-label unfiled-label">UNFILED</div>
-        {#each unfiledFeeds as feed (feed.id)}
+        {#each shownUnfiledFeeds as feed (feed.id)}
           <div class="feed-row">
             <button
               class="row"
               class:selected={selectedFeedId === feed.id}
+              class:quiet={feed.unreadCount === 0}
               class:dragging={draggingFeedId === feed.id}
               draggable="true"
               ondragstart={(event) => handleDragStart(event, feed.id)}
@@ -624,5 +651,17 @@
     outline: 2px solid var(--color-accent);
     outline-offset: -2px;
     background: var(--color-selection-bg);
+  }
+
+  /* Nothing unread: stays listed (so the sidebar doesn't reshuffle) but
+     recedes, letting feeds with something to read stand out. */
+  .row.quiet:not(.selected) .title {
+    color: var(--color-text-secondary);
+  }
+
+  .caught-up {
+    margin: var(--space-4) var(--space-3);
+    color: var(--color-text-tertiary);
+    font-size: var(--text-small);
   }
 </style>

@@ -13,6 +13,7 @@ import type {
   ArticleView,
   FeedSummary,
   Item,
+  ItemFilter,
   RetentionSettings,
   CleanupPreview,
   CleanupResult,
@@ -54,35 +55,33 @@ export function setFeedRefreshInterval(feedId: number, intervalSecs: number): Pr
 export type ItemCursor = { publishedAt: number; id: number };
 
 export function listItems(
+  filter: ItemFilter,
   limit: number,
-  cursor: ItemCursor | null,
-  unreadOnly: boolean,
-  feedId: number | null,
-  folderId?: number | null,
-  savedOnly = false,
+  cursor: ItemCursor | null = null,
 ): Promise<Item[]> {
-  const args: {
-    limit: number;
-    cursorPublishedAt: number | null;
-    cursorId: number | null;
-    unreadOnly: boolean;
-    feedId: number | null;
-    folderId?: number | null;
-    savedOnly: boolean;
-  } = {
+  return invoke('list_items', {
+    filter,
     limit,
     cursorPublishedAt: cursor?.publishedAt ?? null,
     cursorId: cursor?.id ?? null,
-    unreadOnly,
-    feedId,
-    savedOnly,
-  };
-  if (folderId !== undefined) args.folderId = folderId;
-  return invoke('list_items', args);
+  });
 }
 
 export function markRead(itemId: number): Promise<void> {
   return invoke('mark_read', { itemId });
+}
+
+/**
+ * Marks every unread item in the view described by `filter` as read, limited
+ * to items already fetched at `fetchedBefore` (unix seconds, when the view
+ * was loaded). Resolves to the affected ids, for undo via `markItemsUnread`.
+ */
+export function markItemsRead(filter: ItemFilter, fetchedBefore: number): Promise<number[]> {
+  return invoke('mark_items_read', { filter, fetchedBefore });
+}
+
+export function markItemsUnread(itemIds: number[]): Promise<number> {
+  return invoke('mark_items_unread', { itemIds });
 }
 
 export function setItemSaved(itemId: number, saved: boolean): Promise<void> {
@@ -103,10 +102,6 @@ export function previewRetentionCleanup(): Promise<CleanupPreview> {
 
 export function runRetentionCleanup(): Promise<CleanupResult> {
   return invoke('run_retention_cleanup');
-}
-
-export function markFeedRead(feedId: number): Promise<void> {
-  return invoke('mark_feed_read', { feedId });
 }
 
 export function addFeed(url: string): Promise<number> {

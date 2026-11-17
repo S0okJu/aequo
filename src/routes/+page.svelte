@@ -14,18 +14,28 @@
     listFeeds,
     listFeedFolders,
     listItems,
+    markItemsRead,
+    markItemsUnread,
     markRead,
     setItemSaved,
     updateFeedOrganization,
   } from '$lib/api';
-  import type { FeedFolder, FeedSummary, Item } from '$lib/types';
+  import type { FeedFolder, FeedSummary, Item, ItemFilter } from '$lib/types';
 
   const PAGE_SIZE = 50;
-  const TODAY_MAX_PAGES = 20; // generous cap for one day's items across all feeds
   const REFRESH_DEBOUNCE_MS = 200;
   const AI_RAIL_WIDTH = 40;
   const AI_PANEL_OPEN_KEY = 'aequo:aiPanelOpen';
   const SIDEBAR_WIDTH_KEY = 'aequo:sidebarWidth';
+  const UNREAD_ONLY_KEY = 'aequo:unreadOnly';
+
+  function readStoredUnreadOnly(): boolean {
+    try {
+      return localStorage.getItem(UNREAD_ONLY_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  }
 
   function readStoredAiPanelOpen(): boolean {
     try {
@@ -74,6 +84,10 @@
   let selectedToday = $state(false);
   let selectedStarred = $state(false);
   let selectedItemId = $state<number | null>(null);
+  let unreadOnly = $state(readStoredUnreadOnly());
+  // When the current view's first page was loaded (unix seconds): "mark all
+  // read" only touches items fetched by then, never ones that arrived since.
+  let viewLoadedAt = 0;
   let viewportWidth = $state(initialViewportWidth());
   let sidebarWidth = $state(readStoredSidebarWidth());
   let readerWidth = $state(500);
@@ -194,58 +208,104 @@
     folders = nextFolders;
   }
 
-  // First page of the merged timeline (§6.3) for the current feed
-  // selection - replaces items entirely (a feed-updated event or a
-  // feed-selection change can shift what "page 1" even means).
-  async function refreshItems() {
-    const firstPage = await listItems(
-      PAGE_SIZE,
-      null,
-      false,
-      selectedFeedId,
-      selectedFolderId,
-      selectedStarred,
-    );
+  // The filter for whatever the sidebar has selected. Starred ignores the
+  // unread-only toggle: saved posts are kept on purpose, read or not.
+  function currentFilter(): ItemFilter {
+    const filter: ItemFilter = { unreadOnly: unreadOnly && !selectedStarred };
+    if (selectedStarred) filter.savedOnly = true;
+    if (selectedFeedId !== null) filter.feedId = selectedFeedId;
+    if (selectedFolderId !== null) filter.folderId = selectedFolderId;
     if (selectedToday) {
       const now = new Date();
-      const start = Math.floor(
+      filter.publishedFrom = Math.floor(
         new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000,
       );
-      const end = Math.floor(
+      filter.publishedTo = Math.floor(
         new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime() / 1000,
       );
-      const todayItems = firstPage.filter(
-        (item) => item.publishedAt >= start && item.publishedAt < end,
+    }
+    return filter;
+  }
+
+  // First page of the merged timeline (§6.3) for the current selection -
+  // replaces items entirely (a feed-updated event or a selection change can
+  // shift what "page 1" even means). A background refresh in unread-only
+  // mode keeps posts the user already read in place, so a post doesn't
+  // vanish from under them mid-read; they drop out on the next view change.
+  async function refreshItems(background = false) {
+    const loadedAt = Math.floor(Date.now() / 1000);
+    const firstPage = await listItems(currentFilter(), PAGE_SIZE);
+    if (background && unreadOnly && !selectedStarred) {
+      const fetchedIds = new Set(firstPage.map((item) => item.id));
+      const keptRead = items.filter((item) => item.isRead && !fetchedIds.has(item.id));
+      items = [...firstPage, ...keptRead].sort(
+        (a, b) => b.publishedAt - a.publishedAt || b.id - a.id,
       );
-      let page = firstPage;
-      let pagesFetched = 1;
-      while (
-        page.length === PAGE_SIZE &&
-        page[page.length - 1].publishedAt >= start &&
-        pagesFetched < TODAY_MAX_PAGES
-      ) {
-        const cursor = page[page.length - 1];
-        page = await listItems(
-          PAGE_SIZE,
-          { publishedAt: cursor.publishedAt, id: cursor.id },
-          false,
-          selectedFeedId,
-          selectedFolderId,
-        );
-        todayItems.push(
-          ...page.filter((item) => item.publishedAt >= start && item.publishedAt < end),
-        );
-        pagesFetched += 1;
-      }
-      items = todayItems;
-      hasMoreItems = false;
     } else {
       items = firstPage;
-      hasMoreItems = items.length === PAGE_SIZE;
     }
+    hasMoreItems = firstPage.length === PAGE_SIZE;
+    viewLoadedAt = loadedAt;
     if (selectedItemId !== null && !items.some((item) => item.id === selectedItemId)) {
       selectedItemId = null;
     }
+  }
+
+  function setUnreadOnly(value: boolean) {
+    if (unreadOnly === value) return;
+    unreadOnly = value;
+    try {
+      localStorage.setItem(UNREAD_ONLY_KEY, String(value));
+    } catch {
+      // The toggle still applies for this session.
+    }
+    refreshItems();
+  }
+
+  // Unread total for the current view, from the per-feed counts (which cover
+  // every page, not just the loaded ones). Today has no per-feed breakdown,
+  // so it falls back to the loaded items.
+  const viewUnreadCount = $derived.by(() => {
+    if (selectedToday || selectedStarred) return items.filter((item) => !item.isRead).length;
+    const inView = feeds.filter((feed) =>
+      selectedFeedId !== null
+        ? feed.id === selectedFeedId
+        : selectedFolderId !== null
+          ? feed.folderId === selectedFolderId
+          : !feed.hiddenFromAll,
+    );
+    return inView.reduce((sum, feed) => sum + feed.unreadCount, 0);
+  });
+
+  async function markAllRead() {
+    let ids: number[];
+    try {
+      ids = await markItemsRead({ ...currentFilter(), unreadOnly: false }, viewLoadedAt);
+    } catch (error) {
+      showToast("Couldn't mark posts as read", { type: 'error' });
+      console.error('mark_items_read failed:', error);
+      return;
+    }
+    if (ids.length === 0) return;
+    const marked = new Set(ids);
+    for (const item of items) if (marked.has(item.id)) item.isRead = true;
+    await refreshFeeds();
+    showToast(`Marked ${ids.length} ${ids.length === 1 ? 'post' : 'posts'} as read`, {
+      action: { label: 'Undo', run: () => undoMarkAllRead(ids) },
+    });
+  }
+
+  async function undoMarkAllRead(ids: number[]) {
+    try {
+      await markItemsUnread(ids);
+    } catch (error) {
+      showToast("Couldn't undo", { type: 'error' });
+      console.error('mark_items_unread failed:', error);
+      return;
+    }
+    const restored = new Set(ids);
+    for (const item of items) if (restored.has(item.id)) item.isRead = false;
+    await refreshFeeds();
   }
 
   // The post feed requests another page as the reader nears the bottom.
@@ -254,14 +314,10 @@
     loadingMoreItems = true;
     try {
       const cursor = items[items.length - 1];
-      const nextPage = await listItems(
-        PAGE_SIZE,
-        { publishedAt: cursor.publishedAt, id: cursor.id },
-        false,
-        selectedFeedId,
-        selectedFolderId,
-        selectedStarred,
-      );
+      const nextPage = await listItems(currentFilter(), PAGE_SIZE, {
+        publishedAt: cursor.publishedAt,
+        id: cursor.id,
+      });
       items = [...items, ...nextPage];
       hasMoreItems = nextPage.length === PAGE_SIZE;
     } finally {
@@ -462,7 +518,7 @@
       }
       if (!refreshItemsInFlight) {
         refreshItemsInFlight = true;
-        refreshItems().finally(() => (refreshItemsInFlight = false));
+        refreshItems(true).finally(() => (refreshItemsInFlight = false));
       }
     }, REFRESH_DEBOUNCE_MS);
   }
@@ -503,6 +559,7 @@
         {selectedFolderId}
         {selectedToday}
         {selectedStarred}
+        {unreadOnly}
         onSelectFeed={selectFeed}
         onSelectFolder={selectFolder}
         onSelectToday={selectToday}
@@ -546,9 +603,13 @@
         {selectedStarred}
         {selectedItemId}
         hasMore={hasMoreItems}
+        {unreadOnly}
+        unreadCount={viewUnreadCount}
         onSelect={selectPost}
         onToggleSaved={toggleSaved}
         onEndReached={loadMoreItems}
+        onUnreadOnlyChange={setUnreadOnly}
+        onMarkAllRead={markAllRead}
       />
     {/key}
   </main>

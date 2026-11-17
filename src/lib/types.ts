@@ -40,6 +40,20 @@ export interface Item {
   isSaved: boolean;
 }
 
+/**
+ * Which items a timeline view covers (mirrors `db::ItemFilter`). Shared by
+ * listing and "mark all read" so both act on exactly the same rows.
+ */
+export interface ItemFilter {
+  unreadOnly?: boolean;
+  savedOnly?: boolean;
+  feedId?: number | null;
+  folderId?: number | null;
+  /** Inclusive lower / exclusive upper bound on publishedAt (unix seconds). */
+  publishedFrom?: number | null;
+  publishedTo?: number | null;
+}
+
 export interface RetentionSettings {
   readRetentionDays: number;
   fullTextRetentionDays: number;

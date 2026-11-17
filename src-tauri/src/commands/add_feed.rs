@@ -87,16 +87,16 @@ pub async fn add_feed(db_state: State<'_, Mutex<Connection>>, url: String) -> Re
             // write - holding it across an enrichment/discovery `.await`
             // would make this command's future non-`Send`.
             if let Some(discovered) = fetch::discovery::discover(&url, &bytes).await
-                && let Ok(parsed) = fetch::parser::parse(&discovered.bytes) {
-                    let format = fetch::parser::format_label(&parsed);
-                    let title = feed_title(&parsed);
-                    let mut items = fetch::parser::to_new_items(&parsed, &discovered.bytes, now);
-                    fetch::enrichment::enrich_missing_full_content(&mut items, &HashSet::new())
-                        .await;
+                && let Ok(parsed) = fetch::parser::parse(&discovered.bytes)
+            {
+                let format = fetch::parser::format_label(&parsed);
+                let title = feed_title(&parsed);
+                let mut items = fetch::parser::to_new_items(&parsed, &discovered.bytes, now);
+                fetch::enrichment::enrich_missing_full_content(&mut items, &HashSet::new()).await;
 
-                    let conn = lock_conn(&db_state)?;
-                    return store_feed(&conn, &discovered.url, title.as_deref(), format, &items);
-                }
+                let conn = lock_conn(&db_state)?;
+                return store_feed(&conn, &discovered.url, title.as_deref(), format, &items);
+            }
             let mut listing = fetch::webpage::parse(&url, &bytes, now).map_err(|page_error| {
                 format!("Not a supported feed ({feed_error}) or article page ({page_error})")
             })?;
@@ -104,7 +104,13 @@ pub async fn add_feed(db_state: State<'_, Mutex<Connection>>, url: String) -> Re
                 .await;
 
             let conn = lock_conn(&db_state)?;
-            store_feed(&conn, &url, listing.title.as_deref(), "website", &listing.items)
+            store_feed(
+                &conn,
+                &url,
+                listing.title.as_deref(),
+                "website",
+                &listing.items,
+            )
         }
     }
 }
@@ -197,12 +203,29 @@ mod enrichment_wiring_tests {
         fetch::enrichment::enrich_missing_full_content(&mut items, &HashSet::new()).await;
 
         let conn = crate::db::init_in_memory().unwrap();
-        let feed_id = store_feed(&conn, "https://example.com/feed.xml", title.as_deref(), format, &items)
-            .unwrap();
+        let feed_id = store_feed(
+            &conn,
+            "https://example.com/feed.xml",
+            title.as_deref(),
+            format,
+            &items,
+        )
+        .unwrap();
 
-        let stored_items = crate::db::list_items(&conn, 10, None, None, false, Some(feed_id), None, false).unwrap();
+        let stored_items = crate::db::list_items(
+            &conn,
+            &crate::db::ItemFilter {
+                feed_id: Some(feed_id),
+                ..Default::default()
+            },
+            10,
+            None,
+        )
+        .unwrap();
         assert_eq!(stored_items.len(), 1);
-        let stored = crate::db::get_item_by_id(&conn, stored_items[0].id).unwrap().unwrap();
+        let stored = crate::db::get_item_by_id(&conn, stored_items[0].id)
+            .unwrap()
+            .unwrap();
         assert!(
             stored
                 .full_content
