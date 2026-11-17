@@ -6,18 +6,39 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-const USER_AGENT: &str = concat!("Aequo/", env!("CARGO_PKG_VERSION"));
+/// Looks like an ordinary desktop browser rather than a bare app
+/// name/version - some feed hosts (Medium, various corporate blogs)
+/// WAF-block generic/unbranded bot user agents outright, even for
+/// their own public RSS endpoints.
+const USER_AGENT: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) \
+     Chrome/131.0.0.0 Safari/537.36";
+
+const ACCEPT: &str =
+    "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7";
+
+/// Time to establish the TCP/TLS connection. Separate from
+/// `REQUEST_TIMEOUT` so a host that's simply slow to *respond* (but
+/// did connect) gets more room, while a dead/unreachable host still
+/// fails fast instead of holding a polling slot for the full
+/// request timeout.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Applied by the client to every request's connect+read as a whole
 /// (not just connection setup) - one unresponsive feed can't stall a
 /// polling cycle for other feeds sharing this client (§4.2).
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
-fn shared_client() -> &'static reqwest::Client {
+pub(crate) fn shared_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::ACCEPT, ACCEPT.parse().unwrap());
+
         reqwest::Client::builder()
             .user_agent(USER_AGENT)
+            .default_headers(headers)
+            .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
             .build()
             .expect("failed to build shared reqwest client")
@@ -37,7 +58,17 @@ pub fn describe_error(err: &reqwest::Error) -> String {
 }
 
 pub async fn fetch_bytes(url: &str) -> Result<Vec<u8>, reqwest::Error> {
-    let response = shared_client().get(url).send().await?.error_for_status()?;
+    fetch_bytes_with(shared_client(), url).await
+}
+
+/// Same as [`fetch_bytes`], but against an explicit client - lets
+/// discovery's probes and tests use a different client than production's
+/// shared one (e.g. a mock-server-pointed client in tests).
+pub(crate) async fn fetch_bytes_with(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<Vec<u8>, reqwest::Error> {
+    let response = client.get(url).send().await?.error_for_status()?;
     Ok(response.bytes().await?.to_vec())
 }
 
@@ -114,6 +145,39 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
+
+    #[tokio::test]
+    async fn fetch_conditional_sends_both_validators() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/conditional.xml"))
+            .respond_with(ResponseTemplate::new(304))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let url = format!("{}/conditional.xml", mock_server.uri());
+        let outcome = fetch_conditional_with(
+            &reqwest::Client::new(),
+            &url,
+            Some("\"etag-1\""),
+            Some("Mon, 01 Jan 2024 00:00:00 GMT"),
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, ConditionalFetch::NotModified));
+        let requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].headers.get("if-none-match").unwrap(),
+            "\"etag-1\""
+        );
+        assert_eq!(
+            requests[0].headers.get("if-modified-since").unwrap(),
+            "Mon, 01 Jan 2024 00:00:00 GMT"
+        );
+    }
 
     /// Verifies the timeout mechanism itself (a client built with a
     /// short timeout errors out against a slow server), rather than

@@ -1,6 +1,6 @@
 [package]
 name = "aequo"
-version = "0.1.0"
+version = "1.0.0"
 description = "A macOS RSS/Atom/JSON Feed reader"
 authors = ["S0okJu"]
 edition = "2024"
@@ -25,8 +25,13 @@ serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
 feed-rs = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+quick-xml = { version = "0.41", features = ["encoding"] }
+legible = "0.5.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "net"] }
 sha2 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+regex = "1"
+url = "2"
 
 [dev-dependencies]
 wiremock = "0.6"

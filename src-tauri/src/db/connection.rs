@@ -17,6 +17,7 @@ pub fn resolve_db_path(app_data_dir: &Path) -> PathBuf {
 pub fn init(db_path: &Path) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "foreign_keys", true)?;
     schema::apply(&conn)?;
     Ok(conn)
 }
@@ -24,6 +25,7 @@ pub fn init(db_path: &Path) -> Result<Connection> {
 #[cfg(test)]
 pub fn init_in_memory() -> Result<Connection> {
     let conn = Connection::open_in_memory()?;
+    conn.pragma_update(None, "foreign_keys", true)?;
     schema::apply(&conn)?;
     Ok(conn)
 }

@@ -110,13 +110,20 @@ fn next_wake(conn: &Connection) -> Instant {
 /// feeds, repeats. Call once on app launch as a background task
 /// (§3.1) - never busy-loops or wakes on a fixed short interval
 /// (§4.3): between cycles the task is fully parked by `sleep_until`.
-pub async fn run<R: Runtime>(conn: Arc<Mutex<Connection>>, app: AppHandle<R>) {
+pub async fn run<R: Runtime>(
+    conn: Arc<Mutex<Connection>>,
+    app: AppHandle<R>,
+    schedule_changed: Arc<tokio::sync::Notify>,
+) {
     loop {
         let wake_at = {
             let guard = conn.lock().expect("database lock poisoned");
             next_wake(&guard)
         };
-        sleep_until(wake_at).await;
+        tokio::select! {
+            _ = sleep_until(wake_at) => {},
+            _ = schedule_changed.notified() => continue,
+        }
         poll_due_feeds(conn.clone(), app.clone()).await;
     }
 }
@@ -125,7 +132,7 @@ pub async fn run<R: Runtime>(conn: Arc<Mutex<Connection>>, app: AppHandle<R>) {
 mod tests {
     use std::time::Instant as StdInstant;
 
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
@@ -192,6 +199,66 @@ mod tests {
         assert!(
             elapsed < Duration::from_millis(600),
             "expected well under fully-sequential time, got {elapsed:?}"
+        );
+    }
+
+    /// Reproducible release-path measurement for M10: 20 due feeds,
+    /// 5,000 existing SQLite items, and unchanged feeds returning 304.
+    /// Run explicitly with `cargo test -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore = "manual M10 performance verification"]
+    async fn performance_20_feeds_5000_items_304_cycle() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(header("If-None-Match", "\"m10-etag\""))
+            .respond_with(ResponseTemplate::new(304))
+            .expect(20)
+            .mount(&mock_server)
+            .await;
+
+        let conn = init_in_memory().unwrap();
+        for feed_index in 0..20 {
+            let feed_id = db::insert_feed(
+                &conn,
+                &format!("{}/feed-{feed_index}.xml", mock_server.uri()),
+                None,
+                None,
+                0,
+            )
+            .unwrap();
+            db::update_feed_fetched(&conn, feed_id, Some("\"m10-etag\""), None, 0).unwrap();
+
+            let items = (0..250)
+                .map(|item_index| crate::db::NewItem {
+                    guid_hash: format!("{feed_index}-{item_index}"),
+                    title: Some(format!("Article {item_index}")),
+                    link: Some(format!("https://feed-{feed_index}.example/{item_index}")),
+                    summary: Some("M10 fixture article summary".to_string()),
+                    full_content: None,
+                    published_at: 1_700_000_000 + item_index,
+                    fetched_at: 1_700_000_000 + item_index,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(db::upsert_items(&conn, feed_id, &items).unwrap(), 250);
+        }
+
+        let item_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(item_count, 5_000);
+
+        let conn = shared_conn(conn);
+        let started = StdInstant::now();
+        let attempted = poll_due_feeds(conn, mock_app_handle()).await;
+        let elapsed = started.elapsed();
+
+        assert_eq!(attempted, 20);
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "20-feed 304 cycle exceeded 500ms: {elapsed:?}"
+        );
+        eprintln!(
+            "M10 measurement: {attempted} feeds, {item_count} existing items, 304-only cycle in {elapsed:?}"
         );
     }
 

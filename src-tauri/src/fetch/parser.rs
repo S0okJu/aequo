@@ -9,6 +9,8 @@ use sha2::{Digest, Sha256};
 
 use crate::db::NewItem;
 
+use super::raw_content;
+
 pub use feed_rs::parser::ParseFeedError;
 
 /// Parses RSS/Atom/JSON Feed bytes into feed-rs's shared `Feed` model.
@@ -29,21 +31,56 @@ pub fn format_label(feed: &Feed) -> &'static str {
 /// `db::upsert_items`. Shared by `add_feed` (initial fetch) and the
 /// fetch worker (polling), so dedup/field-mapping logic lives in one
 /// place.
-pub fn to_new_items(parsed: &Feed, fetched_at: i64) -> Vec<NewItem> {
+///
+/// `bytes` is the same raw payload `parsed` was produced from - needed
+/// to recover `content:encoded` bodies that feed-rs's model can
+/// silently drop when a feed (mis)declares the tag twice per item,
+/// see [`raw_content`].
+pub fn to_new_items(parsed: &Feed, bytes: &[u8], fetched_at: i64) -> Vec<NewItem> {
+    let recovered = if format_label(parsed) == "rss" {
+        let recovered = raw_content::longest_content_encoded_per_item(bytes);
+        // Only trust this if it lines up 1:1 with the parsed entries -
+        // otherwise something about this feed's <item> structure wasn't
+        // what we assumed, and falling back to feed-rs's own value is
+        // strictly no worse than before this recovery path existed.
+        if recovered.len() == parsed.entries.len() {
+            Some(recovered)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     parsed
         .entries
         .iter()
-        .map(|entry| NewItem {
-            guid_hash: guid_hash(entry),
-            title: entry.title.as_ref().map(|t| t.content.clone()),
-            link: entry.links.first().map(|l| l.href.clone()),
-            summary: entry.summary.as_ref().map(|t| t.content.clone()),
-            published_at: entry
-                .published
-                .or(entry.updated)
-                .map(|dt| dt.timestamp())
-                .unwrap_or(fetched_at),
-            fetched_at,
+        .enumerate()
+        .map(|(i, entry)| {
+            let from_feed_rs = entry
+                .content
+                .as_ref()
+                .and_then(|content| content.body.clone());
+            let from_raw_scan = recovered.as_ref().and_then(|r| r[i].clone());
+            let full_content = match (from_raw_scan, from_feed_rs) {
+                (Some(raw), Some(parsed)) if raw.len() > parsed.len() => Some(raw),
+                (Some(raw), None) => Some(raw),
+                (_, parsed) => parsed,
+            };
+
+            NewItem {
+                guid_hash: guid_hash(entry),
+                title: entry.title.as_ref().map(|t| t.content.clone()),
+                link: entry.links.first().map(|l| l.href.clone()),
+                summary: entry.summary.as_ref().map(|t| t.content.clone()),
+                full_content,
+                published_at: entry
+                    .published
+                    .or(entry.updated)
+                    .map(|dt| dt.timestamp())
+                    .unwrap_or(fetched_at),
+                fetched_at,
+            }
         })
         .collect()
 }
@@ -107,6 +144,11 @@ mod tests {
         "/tests/fixtures/sample_json_feed.json"
     ));
 
+    fn new_items(xml: &str) -> Vec<NewItem> {
+        let feed = parse(xml.as_bytes()).unwrap();
+        to_new_items(&feed, xml.as_bytes(), 0)
+    }
+
     #[test]
     fn parses_rss2_sample() {
         let feed = parse(RSS2_FIXTURE.as_bytes()).unwrap();
@@ -118,7 +160,7 @@ mod tests {
         );
         assert_eq!(
             feed.entries[0].links.first().unwrap().href,
-            "https://example.com/first-post"
+            "https://item.invalid/first-post"
         );
     }
 
@@ -180,6 +222,60 @@ mod tests {
         assert_eq!(
             normalize_link("https://example.com/"),
             "https://example.com"
+        );
+    }
+
+    #[test]
+    fn to_new_items_has_no_full_content_when_the_feed_has_no_content_encoded() {
+        let items = new_items(RSS2_FIXTURE);
+        assert_eq!(items[0].full_content, None);
+        assert_eq!(items[0].summary.as_deref(), Some("This is the first post."));
+    }
+
+    #[test]
+    fn to_new_items_recovers_the_first_of_two_duplicate_content_encoded_elements() {
+        // Reproduces the structure seen on thenewstack.io/blog/feed/: a
+        // real article body in the first content:encoded, clobbered by
+        // a short "dek" reusing the same tag later in the same item.
+        let xml = r#"<?xml version="1.0"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+<channel>
+<item>
+  <title>A</title>
+  <link>https://example.com/a</link>
+  <description>Short summary.</description>
+  <content:encoded><![CDATA[<p>This is the real, long article body that should win.</p>]]></content:encoded>
+  <slash:comments>0</slash:comments>
+  <content:encoded><![CDATA[Short dek.]]></content:encoded>
+</item>
+</channel>
+</rss>"#;
+        let items = new_items(xml);
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0].full_content.as_deref(),
+            Some("<p>This is the real, long article body that should win.</p>")
+        );
+    }
+
+    #[test]
+    fn to_new_items_leaves_well_formed_feeds_untouched() {
+        let xml = r#"<?xml version="1.0"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+<channel>
+<item>
+  <title>A</title>
+  <link>https://example.com/a</link>
+  <description>Just a summary, no full text.</description>
+</item>
+</channel>
+</rss>"#;
+        let items = new_items(xml);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].full_content, None);
+        assert_eq!(
+            items[0].summary.as_deref(),
+            Some("Just a summary, no full text.")
         );
     }
 }

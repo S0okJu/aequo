@@ -9,10 +9,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
 
-use crate::db::{self, FeedMeta};
+use crate::db::{self, FeedMeta, NewItem};
 
 use super::backoff;
 use super::client::{self, ConditionalFetch};
+use super::enrichment;
 use super::parser;
 
 /// What happened when polling a feed.
@@ -38,10 +39,74 @@ fn now_unix() -> i64 {
         .as_secs() as i64
 }
 
+/// Parses a fetched body into candidate items - pure, no DB access, so
+/// it can run before any lock is acquired.
+fn parse_items(meta: &FeedMeta, bytes: &[u8], now: i64) -> Result<Vec<NewItem>, String> {
+    if meta.format.as_deref() == Some("website") {
+        super::webpage::parse(&meta.url, bytes, now).map(|listing| {
+            listing
+                .items
+                .into_iter()
+                .filter(|item| item.published_at > meta.last_checked_at)
+                .collect::<Vec<_>>()
+        })
+    } else {
+        parser::parse(bytes)
+            .map(|parsed| parser::to_new_items(&parsed, bytes, now))
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Persists already-parsed (and, on success, already-enriched) items
+/// plus the feed's new etag/last_modified/next_fetch_at, or records a
+/// parse failure (§7). Split from parsing/enrichment so those steps,
+/// including enrichment's network `.await`s, can run before the DB
+/// lock is acquired, not while holding it.
+fn apply_parsed(
+    conn: &Connection,
+    meta: &FeedMeta,
+    parsed_items: Result<Vec<NewItem>, String>,
+    etag: Option<String>,
+    last_modified: Option<String>,
+    now: i64,
+) -> Result<PollOutcome, String> {
+    match parsed_items {
+        Ok(items) => {
+            let new_item_count =
+                db::upsert_items(conn, meta.id, &items).map_err(|e| e.to_string())?;
+
+            db::update_feed_fetched(
+                conn,
+                meta.id,
+                etag.as_deref(),
+                last_modified.as_deref(),
+                now + meta.interval_secs,
+            )
+            .map_err(|e| e.to_string())?;
+
+            Ok(PollOutcome::Updated { new_item_count })
+        }
+        // Parsing failed even though the fetch succeeded: skip this
+        // cycle only, retry on the next poll (§7). etag/last_modified
+        // are deliberately left untouched here (see record_failure) so
+        // a subsequent identical 200 can be re-attempted rather than
+        // silently becoming a 304.
+        Err(parse_err) => record_failure(conn, meta, &parse_err),
+    }
+}
+
+fn apply_not_modified(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome, String> {
+    let next_fetch_at = now_unix() + meta.interval_secs;
+    db::update_feed_not_modified(conn, meta.id, next_fetch_at).map_err(|e| e.to_string())?;
+    Ok(PollOutcome::NotModified)
+}
+
 /// Polls one feed: sends a conditional GET using its stored
 /// etag/last_modified, then either just reschedules it (304), parses
-/// the body and stores new items (200), or records the failure (§7)
-/// if the fetch itself errored.
+/// the body, pre-fetches full content for items missing it (§ full
+/// article pre-fetch), and stores new items (200), or records the
+/// failure (§7) if the fetch itself errored.
+#[cfg(test)]
 pub async fn poll_feed(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome, String> {
     match client::fetch_conditional(
         &meta.url,
@@ -50,7 +115,21 @@ pub async fn poll_feed(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome
     )
     .await
     {
-        Ok(fetched) => apply_fetch(conn, meta, fetched),
+        Ok(ConditionalFetch::NotModified) => apply_not_modified(conn, meta),
+        Ok(ConditionalFetch::Modified {
+            bytes,
+            etag,
+            last_modified,
+        }) => {
+            let now = now_unix();
+            let mut parsed_items = parse_items(meta, &bytes, now);
+            if let Ok(items) = &mut parsed_items {
+                let has_content =
+                    db::guid_hashes_with_full_content(conn, meta.id).unwrap_or_default();
+                enrichment::enrich_missing_full_content(items, &has_content).await;
+            }
+            apply_parsed(conn, meta, parsed_items, etag, last_modified, now)
+        }
         Err(err) => record_failure(conn, meta, &client::describe_error(&err)),
     }
 }
@@ -58,11 +137,13 @@ pub async fn poll_feed(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome
 /// Same as [`poll_feed`], for callers holding the connection behind a
 /// `Mutex` (the Poll Scheduler's `Arc<Mutex<_>>`, or Tauri's managed
 /// `State<'_, Mutex<_>>` in the `refresh_feed` command - both deref to
-/// `&Mutex<Connection>`) rather than a plain `&Connection`: the
-/// network fetch runs with no lock held at all, and the lock is only
-/// acquired afterward for the synchronous apply/record step - see
-/// [`apply_fetch`]'s doc for why a `MutexGuard` can't simply wrap the
-/// whole async call.
+/// `&Mutex<Connection>`) rather than a plain `&Connection`: the network
+/// fetch and the full-content pre-fetch both run with no lock held at
+/// all, and the lock is only acquired briefly - once to read which
+/// items already have content, once more to persist the final result -
+/// never across an `.await` (a `MutexGuard` held across an `.await`
+/// inside a task spawned on `JoinSet`/`tokio::spawn` wouldn't compile,
+/// since the guard isn't `Send`).
 pub async fn poll_feed_locked(
     conn: &Mutex<Connection>,
     meta: &FeedMeta,
@@ -74,62 +155,41 @@ pub async fn poll_feed_locked(
     )
     .await;
 
-    let guard = conn
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
     match fetched {
-        Ok(fetched) => apply_fetch(&guard, meta, fetched),
-        Err(err) => record_failure(&guard, meta, &client::describe_error(&err)),
-    }
-}
-
-/// Applies an already-fetched response to the DB. Split out from
-/// [`poll_feed`] so the Poll Scheduler (M4) can run the network fetch
-/// without holding any DB lock across the await, then call this
-/// synchronously once it has the lock - a `MutexGuard` held across an
-/// `.await` inside a task spawned on `JoinSet`/`tokio::spawn` wouldn't
-/// compile (the guard isn't `Send`).
-pub fn apply_fetch(
-    conn: &Connection,
-    meta: &FeedMeta,
-    fetched: ConditionalFetch,
-) -> Result<PollOutcome, String> {
-    match fetched {
-        ConditionalFetch::NotModified => {
-            let next_fetch_at = now_unix() + meta.interval_secs;
-            db::update_feed_not_modified(conn, meta.id, next_fetch_at)
-                .map_err(|e| e.to_string())?;
-            Ok(PollOutcome::NotModified)
+        Ok(ConditionalFetch::NotModified) => {
+            let guard = conn
+                .lock()
+                .map_err(|_| "database lock poisoned".to_string())?;
+            apply_not_modified(&guard, meta)
         }
-        ConditionalFetch::Modified {
+        Ok(ConditionalFetch::Modified {
             bytes,
             etag,
             last_modified,
-        } => match parser::parse(&bytes) {
-            Ok(parsed) => {
-                let now = now_unix();
-                let items = parser::to_new_items(&parsed, now);
-                let new_item_count =
-                    db::upsert_items(conn, meta.id, &items).map_err(|e| e.to_string())?;
-
-                db::update_feed_fetched(
-                    conn,
-                    meta.id,
-                    etag.as_deref(),
-                    last_modified.as_deref(),
-                    now + meta.interval_secs,
-                )
-                .map_err(|e| e.to_string())?;
-
-                Ok(PollOutcome::Updated { new_item_count })
+        }) => {
+            let now = now_unix();
+            let mut parsed_items = parse_items(meta, &bytes, now);
+            if let Ok(items) = &mut parsed_items {
+                let has_content = {
+                    let guard = conn
+                        .lock()
+                        .map_err(|_| "database lock poisoned".to_string())?;
+                    db::guid_hashes_with_full_content(&guard, meta.id).unwrap_or_default()
+                    // guard dropped here, before the next .await
+                };
+                enrichment::enrich_missing_full_content(items, &has_content).await;
             }
-            // Parsing failed even though the fetch succeeded: skip
-            // this cycle only, retry on the next poll (§7). etag/
-            // last_modified are deliberately left untouched here (see
-            // record_failure) so a subsequent identical 200 can be
-            // re-attempted rather than silently becoming a 304.
-            Err(parse_err) => record_failure(conn, meta, &parse_err.to_string()),
-        },
+            let guard = conn
+                .lock()
+                .map_err(|_| "database lock poisoned".to_string())?;
+            apply_parsed(&guard, meta, parsed_items, etag, last_modified, now)
+        }
+        Err(err) => {
+            let guard = conn
+                .lock()
+                .map_err(|_| "database lock poisoned".to_string())?;
+            record_failure(&guard, meta, &client::describe_error(&err))
+        }
     }
 }
 
@@ -144,8 +204,14 @@ pub fn record_failure(
     error: &str,
 ) -> Result<PollOutcome, String> {
     let consecutive_failures = meta.consecutive_failures + 1;
-    let next_fetch_at =
-        now_unix() + backoff::backoff_secs(consecutive_failures, meta.interval_secs);
+    let retry_after = if meta.format.as_deref() == Some("website") {
+        // Page checks are intentionally low frequency; a failed page
+        // request must not turn the daily schedule into rapid retries.
+        meta.interval_secs
+    } else {
+        backoff::backoff_secs(consecutive_failures, meta.interval_secs)
+    };
+    let next_fetch_at = now_unix() + retry_after;
 
     db::update_feed_failed(conn, meta.id, error, next_fetch_at, consecutive_failures)
         .map_err(|e| e.to_string())?;
@@ -196,6 +262,54 @@ mod tests {
             Some("Mon, 01 Jan 2024 00:00:00 GMT".to_string())
         );
         assert!(updated.next_fetch_at > 0);
+    }
+
+    #[tokio::test]
+    async fn poll_feed_200_pre_fetches_full_content_for_new_items() {
+        let mock_server = MockServer::start().await;
+        let feed_body = RSS2_FIXTURE.replace("https://item.invalid", &mock_server.uri());
+        Mock::given(method("GET"))
+            .and(path("/feed.xml"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(feed_body))
+            .mount(&mock_server)
+            .await;
+        let article_html = r#"<html><head><title>Example</title></head><body>
+<article><p>This is a long enough paragraph of real article text to clear the readability floor comfortably.</p></article>
+</body></html>"#;
+        Mock::given(method("GET"))
+            .and(path("/first-post"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(article_html, "text/html"))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/second-post"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(article_html, "text/html"))
+            .mount(&mock_server)
+            .await;
+
+        let url = format!("{}/feed.xml", mock_server.uri());
+        let conn = db::init_in_memory().unwrap();
+        let feed_id = db::insert_feed(&conn, &url, None, None, 0).unwrap();
+        let meta = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
+
+        let outcome = poll_feed(&conn, &meta).await.unwrap();
+        assert_eq!(outcome, PollOutcome::Updated { new_item_count: 2 });
+
+        // `db::list_items` deliberately nulls `full_content` for list
+        // views (payload-size optimization) - fetch each item by id to
+        // see the real stored value.
+        let list = db::list_items(&conn, 10, None, None, false, None, None, false).unwrap();
+        assert_eq!(list.len(), 2);
+        for summary in &list {
+            let full = db::get_item_by_id(&conn, summary.id).unwrap().unwrap();
+            assert!(
+                full.full_content
+                    .as_deref()
+                    .is_some_and(|c| c.contains("long enough paragraph")),
+                "expected item {} to have pre-fetched full content, got {full:?}",
+                summary.id
+            );
+        }
     }
 
     #[tokio::test]

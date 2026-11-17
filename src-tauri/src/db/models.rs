@@ -19,6 +19,17 @@ pub struct Feed {
     pub last_error: Option<String>,
     pub consecutive_failures: i64,
     pub created_at: i64,
+    pub folder_id: Option<i64>,
+    pub hidden_from_all: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedFolder {
+    pub id: i64,
+    pub name: String,
+    pub sort_order: i64,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -30,9 +41,35 @@ pub struct Item {
     pub title: Option<String>,
     pub link: Option<String>,
     pub summary: Option<String>,
+    pub full_content: Option<String>,
     pub published_at: i64,
     pub fetched_at: i64,
     pub is_read: bool,
+    pub read_at: Option<i64>,
+    pub is_saved: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetentionSettings {
+    pub read_retention_days: i64,
+    pub full_text_retention_days: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupPreview {
+    pub articles_to_remove: i64,
+    pub full_texts_to_clear: i64,
+    pub estimated_bytes_to_free: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupResult {
+    pub articles_removed: i64,
+    pub full_texts_cleared: i64,
+    pub bytes_freed: i64,
 }
 
 /// A parsed feed item not yet inserted - the subset of `Item` fields
@@ -43,6 +80,7 @@ pub struct NewItem {
     pub title: Option<String>,
     pub link: Option<String>,
     pub summary: Option<String>,
+    pub full_content: Option<String>,
     pub published_at: i64,
     pub fetched_at: i64,
 }
@@ -55,9 +93,53 @@ pub struct NewItem {
 pub struct FeedMeta {
     pub id: i64,
     pub url: String,
+    pub format: Option<String>,
     pub etag: Option<String>,
     pub last_modified: Option<String>,
     pub interval_secs: i64,
     pub next_fetch_at: i64,
+    pub last_checked_at: i64,
     pub consecutive_failures: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSession {
+    pub id: i64,
+    pub item_id: i64,
+    pub provider: String,
+    pub provider_session_id: Option<String>,
+    pub title: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Annotation {
+    pub id: i64,
+    pub item_id: i64,
+    pub kind: String,
+    pub content_hash: String,
+    pub start_offset: i64,
+    pub end_offset: i64,
+    pub quoted_text: String,
+    pub color: Option<String>,
+    pub note: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArticleCache {
+    pub item_id: i64,
+    pub original_url: String,
+    pub final_url: Option<String>,
+    pub title: Option<String>,
+    pub content_html: Option<String>,
+    pub text_content: Option<String>,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    pub fetched_at: i64,
+    pub error: Option<String>,
 }

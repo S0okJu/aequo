@@ -1,24 +1,27 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Aequo",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "identifier": "io.github.s0okju.aequo",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm icons && pnpm build",
     "frontendDist": "../build"
   },
   "app": {
     "windows": [
       {
         "title": "Aequo",
-        "width": 800,
-        "height": 600
+        "width": 1360,
+        "height": 850,
+        "minWidth": 1100,
+        "minHeight": 600,
+        "dragDropEnabled": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1421; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; media-src 'none'"
     }
   },
   "bundle": {

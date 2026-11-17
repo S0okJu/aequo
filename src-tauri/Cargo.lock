@@ -10,9 +10,13 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "aequo"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
+ "chrono",
  "feed-rs",
+ "legible",
+ "quick-xml 0.41.0",
+ "regex",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -22,6 +26,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "tokio",
+ "url",
  "wiremock",
 ]
 
@@ -2181,6 +2186,23 @@ name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
+
+[[package]]
+name = "legible"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1365098e73aae697c4d747782d2fd5b9bfa3d6a82f2a3f6070c2039053146e5"
+dependencies = [
+ "html5ever 0.39.0",
+ "memchr",
+ "regex",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "tendril",
+ "thiserror 2.0.21",
+ "url",
+]
 
 [[package]]
 name = "libappindicator"
@@ -4392,6 +4414,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
