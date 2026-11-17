@@ -4,6 +4,7 @@
   import { resolve } from '$app/paths';
   import { listen } from '@tauri-apps/api/event';
   import type AiPanelType from '$lib/components/AiPanel.svelte';
+  import AddFeedDialog from '$lib/components/AddFeedDialog.svelte';
   import FeedList from '$lib/components/FeedList.svelte';
   import PostsFeed from '$lib/components/PostsFeed.svelte';
   import PostReader from '$lib/components/PostReader.svelte';
@@ -414,8 +415,21 @@
     goto(resolve(`/settings?tab=${tab}`));
   }
 
+  let addFeedOpen = $state(false);
+  // New feeds land in the folder being viewed (or the viewed feed's folder).
+  const addFeedDefaultFolderId = $derived(
+    selectedFolderId ?? feeds.find((feed) => feed.id === selectedFeedId)?.folderId ?? null,
+  );
+
   function addFeedFromSidebar() {
-    goto(resolve('/settings?tab=feeds'));
+    addFeedOpen = true;
+  }
+
+  async function handleFeedAdded(feedId: number) {
+    addFeedOpen = false;
+    await refreshFeeds();
+    selectFeed(feedId);
+    showToast(t('toast.feedAdded'), { type: 'success' });
   }
 
   // Refresh results arrive through the usual `feed-updated` event.
@@ -733,6 +747,14 @@
     </aside>
   {/if}
 </div>
+
+<AddFeedDialog
+  open={addFeedOpen}
+  {folders}
+  defaultFolderId={addFeedDefaultFolderId}
+  onAdded={handleFeedAdded}
+  onClose={() => (addFeedOpen = false)}
+/>
 
 <style>
   .layout {

@@ -13,6 +13,7 @@ const en = {
   'common.delete': 'Delete',
   'common.loading': 'Loading',
   'common.dismiss': 'Dismiss notification',
+  'common.cancel': 'Cancel',
   'common.undo': 'Undo',
 
   'page.resizeSidebar': 'Resize feed navigation',
@@ -93,6 +94,9 @@ const en = {
   'reader.positionNotFound': 'Position not found',
   'reader.selectPost': 'Select a post to read it.',
 
+  'addFeed.folder': 'Folder',
+  'addFeed.title': 'Add feed',
+  'addFeed.hint': 'Paste an RSS, Atom or JSON Feed URL, or a page that lists articles.',
   'addFeed.placeholder': 'Add feed URL…',
   'addFeed.urlLabel': 'Feed URL',
   'addFeed.submit': 'Add feed',

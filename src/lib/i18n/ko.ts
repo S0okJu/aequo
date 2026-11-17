@@ -12,6 +12,7 @@ const ko: Record<MessageKey, Message> = {
   'common.delete': '삭제',
   'common.loading': '불러오는 중',
   'common.dismiss': '알림 닫기',
+  'common.cancel': '취소',
   'common.undo': '실행 취소',
 
   'page.resizeSidebar': '피드 탐색 너비 조절',
@@ -92,6 +93,9 @@ const ko: Record<MessageKey, Message> = {
   'reader.positionNotFound': '위치를 찾을 수 없음',
   'reader.selectPost': '읽을 글을 선택하세요.',
 
+  'addFeed.folder': '폴더',
+  'addFeed.title': '피드 추가',
+  'addFeed.hint': 'RSS, Atom, JSON Feed 주소나 글 목록이 있는 페이지 주소를 붙여넣으세요.',
   'addFeed.placeholder': '피드 URL 추가…',
   'addFeed.urlLabel': '피드 URL',
   'addFeed.submit': '피드 추가',
