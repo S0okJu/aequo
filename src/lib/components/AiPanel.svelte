@@ -671,7 +671,6 @@
     min-width: 0;
     height: 100%;
     flex-direction: column;
-    border-left: 1px solid var(--color-border);
     background: var(--color-bg);
     color: var(--color-text);
   }

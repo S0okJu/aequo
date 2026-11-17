@@ -695,7 +695,7 @@
     min-height: 0;
     width: 100%;
     overflow: hidden;
-    background: var(--color-bg-secondary);
+    background: var(--color-bg);
     transition: grid-template-columns var(--transition-layout);
   }
 
@@ -718,7 +718,6 @@
     display: flex;
     flex-direction: column;
     background: var(--color-bg-secondary);
-    border-right: 1px solid var(--color-border);
   }
 
   .feed-list-scroll {
@@ -751,8 +750,7 @@
   }
 
   .posts-pane {
-    background: var(--color-bg-secondary);
-    border-right: 1px solid var(--color-border);
+    background: var(--color-bg);
   }
 
   .reader-pane {
@@ -774,20 +772,40 @@
     grid-column: 2 / 3;
   }
 
+  /* The 6px track stays grabbable but reads as a single 1px hairline on its
+     left edge (the pane boundary); it thickens to an accent bar while
+     hovered, focused or dragged. */
   .resize-handle {
     position: relative;
     z-index: 1;
     width: 6px;
     height: 100%;
-    background: var(--color-bg-secondary);
-    transition: background-color var(--transition);
+    background: var(--color-bg);
     cursor: col-resize;
     touch-action: none;
   }
 
-  .resize-handle:hover,
-  .resize-handle:focus-visible {
+  .resize-handle::before {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 1px;
+    background: var(--color-border);
+    content: '';
+    transition:
+      width var(--transition),
+      background-color var(--transition);
+  }
+
+  .resize-handle:hover::before,
+  .resize-handle:focus-visible::before,
+  .layout.no-transition .resize-handle:active::before {
+    width: 2px;
     background: var(--color-accent);
+  }
+
+  .resize-handle:focus-visible {
     outline: none;
   }
 </style>
