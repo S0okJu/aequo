@@ -33,6 +33,11 @@
     onEndReached: () => void;
     onUnreadOnlyChange?: (unreadOnly: boolean) => void;
     onMarkAllRead?: () => void;
+    /** Search text for this view; '' when not searching. */
+    query?: string;
+    onQueryChange?: (query: string) => void;
+    onRefresh?: () => void;
+    refreshing?: boolean;
   }
 
   let {
@@ -53,7 +58,41 @@
     onEndReached,
     onUnreadOnlyChange,
     onMarkAllRead,
+    query = '',
+    onQueryChange,
+    onRefresh,
+    refreshing = false,
   }: Props = $props();
+
+  // svelte-ignore state_referenced_locally
+  let searchOpen = $state(query !== '');
+  let searchInput = $state<HTMLInputElement | undefined>(undefined);
+
+  function openSearch() {
+    searchOpen = true;
+    queueMicrotask(() => searchInput?.focus());
+  }
+
+  function closeSearch() {
+    searchOpen = false;
+    onQueryChange?.('');
+  }
+
+  /** The title split around case-insensitive matches of the search text. */
+  function highlight(title: string): { text: string; match: boolean }[] {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return [{ text: title, match: false }];
+    const parts: { text: string; match: boolean }[] = [];
+    const haystack = title.toLowerCase();
+    let from = 0;
+    for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, from)) {
+      if (at > from) parts.push({ text: title.slice(from, at), match: false });
+      parts.push({ text: title.slice(at, at + needle.length), match: true });
+      from = at + needle.length;
+    }
+    if (from < title.length) parts.push({ text: title.slice(from), match: false });
+    return parts;
+  }
 
   const selectedFeed = $derived(feeds.find((feed) => feed.id === selectedFeedId));
   const selectedFolder = $derived(folders.find((folder) => folder.id === selectedFolderId));
@@ -106,11 +145,58 @@
 <div class="posts-scroll" onscroll={handleScroll}>
   <div class="posts">
     <div class="feed-context">
-      <span class="feed-context-label">{viewLabel}</span>
-      <strong>{viewTitle}</strong>
-      {#if unreadInView > 0}<span class="unread-count"
-          >{t('posts.unreadCount', { count: unreadInView })}</span
-        >{/if}
+      {#if searchOpen}
+        <div class="search">
+          <Icon name="search" size={14} />
+          <input
+            bind:this={searchInput}
+            type="search"
+            value={query}
+            aria-label={t('posts.search')}
+            placeholder={t('posts.searchPlaceholder')}
+            oninput={(event) => onQueryChange?.(event.currentTarget.value)}
+            onkeydown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeSearch();
+              }
+            }}
+          />
+          <button
+            type="button"
+            class="toolbar-button small"
+            aria-label={t('posts.closeSearch')}
+            title={t('posts.closeSearch')}
+            onclick={closeSearch}><Icon name="close" size={12} /></button
+          >
+        </div>
+      {:else}
+        <span class="feed-context-label">{viewLabel}</span>
+        <strong>{viewTitle}</strong>
+        {#if unreadInView > 0}<span class="unread-count"
+            >{t('posts.unreadCount', { count: unreadInView })}</span
+          >{/if}
+        {#if onQueryChange}
+          <button
+            type="button"
+            class="toolbar-button"
+            aria-label={t('posts.search')}
+            title={t('posts.search')}
+            onclick={openSearch}><Icon name="search" size={15} /></button
+          >
+        {/if}
+      {/if}
+      {#if onRefresh}
+        <button
+          type="button"
+          class="toolbar-button"
+          class:spinning={refreshing}
+          aria-label={t('posts.refresh')}
+          title={t('posts.refresh')}
+          disabled={refreshing}
+          onclick={onRefresh}><Icon name="retry" size={15} /></button
+        >
+      {/if}
       {#if onUnreadOnlyChange && !selectedStarred}
         <div class="segmented" role="group" aria-label={t('posts.filter.label')}>
           <button type="button" aria-pressed={!unreadOnly} onclick={() => onUnreadOnlyChange(false)}
@@ -141,7 +227,10 @@
         <span class="empty-placeholder-icon"
           ><Icon name={selectedStarred ? 'star-outline' : 'empty'} size={20} /></span
         >
-        {#if selectedStarred}
+        {#if query.trim()}
+          <h1>{t('posts.empty.noMatchTitle')}</h1>
+          <p>{t('posts.empty.noMatchBody', { query: query.trim() })}</p>
+        {:else if selectedStarred}
           <h1>{t('posts.empty.starredTitle')}</h1>
           <p>{t('posts.empty.starredBody')}</p>
         {:else if unreadOnly}
@@ -201,7 +290,11 @@
               }}><Icon name={item.isSaved ? 'star' : 'star-outline'} size={14} /></button
             >
           </span>
-          <span class="title">{item.title ?? '(untitled)'}</span>
+          <span class="title"
+            >{#each highlight(item.title ?? '(untitled)') as part, index (index)}{#if part.match}<mark
+                  >{part.text}</mark
+                >{:else}{part.text}{/if}{/each}</span
+          >
           <FeedContent
             content={stripSyndicationFooter(item.summary ?? item.fullContent)}
             baseUrl={item.link ?? feed?.url ?? ''}
@@ -314,6 +407,53 @@
     background: var(--color-hover-bg);
     color: var(--color-text);
   }
+  .toolbar-button.small {
+    width: 22px;
+    height: 22px;
+  }
+  .toolbar-button.spinning :global(svg) {
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .search {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 2px 0 var(--space-2);
+    border: 1px solid var(--color-accent);
+    border-radius: var(--radius-md);
+    color: var(--color-text-tertiary);
+  }
+  .search input {
+    min-width: 0;
+    flex: 1;
+    height: 28px;
+    border: 0;
+    background: transparent;
+    color: var(--color-text);
+    font: inherit;
+    font-size: var(--text-body);
+  }
+  .search input:focus {
+    outline: none;
+  }
+  .search input::-webkit-search-cancel-button {
+    display: none;
+  }
+
+  .title mark {
+    border-radius: 2px;
+    background: var(--hl-yellow);
+    color: inherit;
+  }
+
   .toolbar-button:disabled {
     opacity: 0.4;
     cursor: default;

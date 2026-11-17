@@ -16,6 +16,8 @@ pub struct ItemFilter {
     /// Today view).
     pub published_from: Option<i64>,
     pub published_to: Option<i64>,
+    /// Search text (title, summary and RSS body; see `db::search`).
+    pub query: Option<String>,
 }
 
 /// Keyset pagination position: "strictly older than this row".

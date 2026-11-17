@@ -76,6 +76,19 @@ const en = {
   'posts.empty.noneTitle': 'No posts yet',
   'posts.empty.noneBody': 'New posts from your subscriptions will show up here.',
 
+  'posts.search': 'Search posts',
+  'posts.searchPlaceholder': 'Search this view',
+  'posts.closeSearch': 'Close search',
+  'posts.refresh': 'Refresh feeds',
+  'posts.empty.noMatchTitle': 'No matching posts',
+  'posts.empty.noMatchBody': 'Nothing in this view matches "{query}".',
+  'reader.markUnread': 'Mark as unread',
+  'toast.refreshSomeFailed': {
+    one: "Couldn't refresh {count} feed",
+    other: "Couldn't refresh {count} feeds",
+  },
+  'toast.markUnreadFailed': "Couldn't mark post as unread",
+
   'reader.openOriginal': 'Open original site',
   'reader.refreshFullText': 'Refresh full text',
   'reader.refreshFullTextCached': 'Refresh full text (showing a cached copy)',

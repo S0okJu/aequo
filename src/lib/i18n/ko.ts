@@ -75,6 +75,16 @@ const ko: Record<MessageKey, Message> = {
   'posts.empty.noneTitle': '아직 글이 없습니다',
   'posts.empty.noneBody': '구독한 피드의 새 글이 여기에 표시됩니다.',
 
+  'posts.search': '글 검색',
+  'posts.searchPlaceholder': '이 보기에서 검색',
+  'posts.closeSearch': '검색 닫기',
+  'posts.refresh': '피드 새로고침',
+  'posts.empty.noMatchTitle': '일치하는 글이 없습니다',
+  'posts.empty.noMatchBody': '이 보기에 "{query}"와(과) 일치하는 글이 없습니다.',
+  'reader.markUnread': '안 읽음으로 표시',
+  'toast.refreshSomeFailed': { other: '피드 {count}개를 새로고침하지 못했습니다' },
+  'toast.markUnreadFailed': '글을 안 읽음으로 표시하지 못했습니다',
+
   'reader.openOriginal': '원문 사이트 열기',
   'reader.refreshFullText': '전문 새로고침',
   'reader.refreshFullTextCached': '전문 새로고침 (저장된 사본을 보는 중)',

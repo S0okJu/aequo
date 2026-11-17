@@ -56,6 +56,8 @@ export interface ItemFilter {
   /** Inclusive lower / exclusive upper bound on publishedAt (unix seconds). */
   publishedFrom?: number | null;
   publishedTo?: number | null;
+  /** Search text matched against title, summary and RSS body. */
+  query?: string | null;
 }
 
 /** What a sidebar action (mark read, open settings) applies to. */

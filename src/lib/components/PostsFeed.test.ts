@@ -162,4 +162,32 @@ describe('PostsFeed', () => {
     await fireEvent.click(getByRole('button', { name: 'Mark all as read' }));
     expect(onMarkAllRead).toHaveBeenCalledOnce();
   });
+
+  it('searches the view and highlights matches in titles', async () => {
+    const onQueryChange = vi.fn();
+    const props = {
+      items,
+      feeds,
+      folders: [],
+      selectedFeedId: null,
+      selectedFolderId: null,
+      selectedItemId: null,
+      hasMore: false,
+      onSelect: vi.fn(),
+      onToggleSaved: vi.fn(),
+      onEndReached: vi.fn(),
+      onQueryChange,
+    };
+    const { getByRole, getByLabelText, container, rerender } = render(PostsFeed, { props });
+
+    await fireEvent.click(getByRole('button', { name: 'Search posts' }));
+    await fireEvent.input(getByLabelText('Search posts'), { target: { value: 'newest' } });
+    expect(onQueryChange).toHaveBeenLastCalledWith('newest');
+
+    await rerender({ ...props, query: 'newest' });
+    expect(container.querySelector('.title mark')?.textContent).toBe('Newest');
+
+    await fireEvent.keyDown(getByLabelText('Search posts'), { key: 'Escape' });
+    expect(onQueryChange).toHaveBeenLastCalledWith('');
+  });
 });

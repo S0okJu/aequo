@@ -527,6 +527,16 @@ fn filter_conditions(filter: &ItemFilter) -> (Vec<&'static str>, Vec<Value>) {
         conditions.push("published_at < ?");
         values.push(Value::Integer(to));
     }
+    if let Some(query) = filter
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+    {
+        let (condition, params) = super::search::query_condition(query);
+        conditions.push(condition);
+        values.extend(params.into_iter().map(Value::Text));
+    }
     (conditions, values)
 }
 
@@ -936,6 +946,78 @@ mod tests {
         };
         mark_items_read(&conn, &filter, 1_700_000_100, 1_700_000_300).unwrap();
         assert_eq!(count_unread(&conn, feed_id).unwrap(), 0);
+    }
+
+    #[test]
+    fn search_finds_substrings_in_titles_summaries_and_bodies() {
+        let conn = init_in_memory().unwrap();
+        let a = insert_feed(&conn, "https://a.example/feed.xml", None, None, 0).unwrap();
+        let b = insert_feed(&conn, "https://b.example/feed.xml", None, None, 0).unwrap();
+        let item = |guid: &str, title: &str, summary: &str, body: Option<&str>| NewItem {
+            title: Some(title.to_string()),
+            summary: Some(summary.to_string()),
+            full_content: body.map(str::to_string),
+            ..sample_item(guid)
+        };
+        upsert_items(
+            &conn,
+            a,
+            &[
+                item("k", "토스 기술 블로그에서 배운 것", "<p>회고</p>", None),
+                item(
+                    "x",
+                    "Rust 2024 edition",
+                    "notes",
+                    Some("<p>about <b>async-closures</b></p>"),
+                ),
+                item("ai", "AI agents", "short", None),
+            ],
+        )
+        .unwrap();
+        upsert_items(
+            &conn,
+            b,
+            &[item("o", "Other blog post", "블로그 소식", None)],
+        )
+        .unwrap();
+
+        let search = |query: &str, feed_id: Option<i64>| -> Vec<String> {
+            let filter = ItemFilter {
+                query: Some(query.to_string()),
+                feed_id,
+                ..Default::default()
+            };
+            let mut found: Vec<String> = list_items(&conn, &filter, 10, None)
+                .unwrap()
+                .into_iter()
+                .map(|item| item.guid_hash)
+                .collect();
+            found.sort();
+            found
+        };
+
+        // Korean stem inside a word with a particle, across title and summary.
+        assert_eq!(search("블로그", None), ["k", "o"]);
+        assert_eq!(search("블로그", Some(a)), ["k"]);
+        // Body text, with HTML stripped and the hyphen taken literally.
+        assert_eq!(search("async-closures", None), ["x"]);
+        // Two characters: title/summary LIKE fallback, case-insensitive.
+        assert_eq!(search("ai", None), ["ai"]);
+        assert!(search("nothing like this", None).is_empty());
+
+        // Edits re-index; deletes drop out of the index.
+        conn.execute(
+            "UPDATE items SET title = 'Renamed' WHERE guid_hash = 'k'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(search("Renamed", None), ["k"]);
+        delete_feed(&conn, b).unwrap();
+        assert_eq!(search("블로그", None), Vec::<String>::new());
+        let indexed: i64 = conn
+            .query_row("SELECT count(*) FROM items_fts", [], |row| row.get(0))
+            .unwrap_or(-1);
+        assert!(indexed >= 0);
     }
 
     #[test]

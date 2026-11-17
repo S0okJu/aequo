@@ -87,6 +87,10 @@
   let selectedStarred = $state(false);
   let selectedItemId = $state<number | null>(null);
   let unreadOnly = $state(readStoredUnreadOnly());
+  // Search within the current view (§3.14); cleared when the view changes.
+  let searchQuery = $state('');
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  let refreshingView = $state(false);
   // When the current view's first page was loaded (unix seconds): "mark all
   // read" only touches items fetched by then, never ones that arrived since.
   let viewLoadedAt = 0;
@@ -218,6 +222,7 @@
   // unread-only toggle: saved posts are kept on purpose, read or not.
   function currentFilter(): ItemFilter {
     const filter: ItemFilter = { unreadOnly: unreadOnly && !selectedStarred };
+    if (searchQuery.trim()) filter.query = searchQuery.trim();
     if (selectedStarred) filter.savedOnly = true;
     if (selectedFeedId !== null) filter.feedId = selectedFeedId;
     if (selectedFolderId !== null) filter.folderId = selectedFolderId;
@@ -254,6 +259,35 @@
     viewLoadedAt = loadedAt;
     if (selectedItemId !== null && !items.some((item) => item.id === selectedItemId)) {
       selectedItemId = null;
+    }
+  }
+
+  function setSearchQuery(query: string) {
+    searchQuery = query;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => refreshItems(), 200);
+  }
+
+  // Feeds the current view draws from; Today and Starred span them all.
+  function feedsInView(): FeedSummary[] {
+    if (selectedFeedId !== null) return feeds.filter((feed) => feed.id === selectedFeedId);
+    if (selectedFolderId !== null)
+      return feeds.filter((feed) => feed.folderId === selectedFolderId);
+    return feeds.filter((feed) => selectedStarred || selectedToday || !feed.hiddenFromAll);
+  }
+
+  // New posts land through the usual feed-updated events; a failure on one
+  // feed doesn't stop the others.
+  async function refreshView() {
+    if (refreshingView) return;
+    refreshingView = true;
+    try {
+      const results = await Promise.allSettled(feedsInView().map((feed) => refreshFeed(feed.id)));
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      if (failed > 0) showToast(t('toast.refreshSomeFailed', { count: failed }), { type: 'error' });
+      await Promise.all([refreshFeeds(), refreshItems()]);
+    } finally {
+      refreshingView = false;
     }
   }
 
@@ -347,6 +381,7 @@
     selectedToday = false;
     selectedStarred = false;
     selectedItemId = null;
+    searchQuery = '';
     refreshItems();
   }
 
@@ -356,6 +391,7 @@
     selectedToday = false;
     selectedStarred = false;
     selectedItemId = null;
+    searchQuery = '';
     refreshItems();
   }
 
@@ -365,6 +401,7 @@
     selectedToday = true;
     selectedStarred = false;
     selectedItemId = null;
+    searchQuery = '';
     refreshItems();
   }
 
@@ -374,6 +411,7 @@
     selectedToday = false;
     selectedStarred = true;
     selectedItemId = null;
+    searchQuery = '';
     refreshItems();
   }
 
@@ -444,6 +482,22 @@
         type: 'error',
       });
       console.error('refresh_feed failed:', error);
+    }
+  }
+
+  async function markPostUnread(itemId: number) {
+    const item = items.find((entry) => entry.id === itemId);
+    if (!item || !item.isRead) return;
+    item.isRead = false;
+    const feed = feeds.find((entry) => entry.id === item.feedId);
+    if (feed) feed.unreadCount += 1;
+    try {
+      await markItemsUnread([itemId]);
+    } catch (error) {
+      item.isRead = true;
+      if (feed) feed.unreadCount = Math.max(0, feed.unreadCount - 1);
+      showToast(t('toast.markUnreadFailed'), { type: 'error' });
+      console.error('mark_items_unread failed:', error);
     }
   }
 
@@ -678,6 +732,10 @@
         onEndReached={loadMoreItems}
         onUnreadOnlyChange={setUnreadOnly}
         onMarkAllRead={markAllRead}
+        query={searchQuery}
+        onQueryChange={setSearchQuery}
+        onRefresh={refreshView}
+        refreshing={refreshingView}
       />
     {/key}
   </main>
@@ -709,6 +767,7 @@
           pendingQuote = quotedText;
           aiPanelOpen = true;
         }}
+        onMarkUnread={markPostUnread}
         aiOpen={showAi}
         onToggleAi={() => (aiPanelOpen = !aiPanelOpen)}
       />

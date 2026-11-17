@@ -24,6 +24,7 @@
     /** Whether the AI panel is showing beside this post. */
     aiOpen?: boolean;
     onToggleAi?: () => void;
+    onMarkUnread?: (itemId: number) => void;
   }
 
   let {
@@ -34,6 +35,7 @@
     onAskAi,
     aiOpen = false,
     onToggleAi,
+    onMarkUnread,
   }: Props = $props();
   let article = $state<ArticleView | null>(null);
   let loadingArticle = $state(false);
@@ -175,6 +177,15 @@
               onclick={() => onToggleSaved(item.id)}
               ><Icon name={item.isSaved ? 'star' : 'star-outline'} size={16} /></button
             >
+            {#if onMarkUnread && item.isRead}
+              <button
+                class="icon-button"
+                type="button"
+                aria-label={t('reader.markUnread')}
+                title={t('reader.markUnread')}
+                onclick={() => onMarkUnread(item.id)}><Icon name="dot" size={16} /></button
+              >
+            {/if}
             {#if item.link}
               <!-- eslint-disable svelte/no-navigation-without-resolve -->
               <a

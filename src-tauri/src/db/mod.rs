@@ -5,6 +5,7 @@ mod connection;
 mod models;
 mod repository;
 mod schema;
+mod search;
 
 pub use connection::{init, resolve_db_path};
 pub use models::{
