@@ -45,6 +45,22 @@ try {
               }
               if (cmd === 'get_resource_settings')
                 return { snapshot: { revision: 1, settings }, runningWork: 0, recoveryError: null };
+              if (cmd === 'get_update_state')
+                return {
+                  revision: 1,
+                  operationId: 0,
+                  currentVersion: '1.0.1',
+                  phase: 'idle',
+                  enabled: false,
+                  autoUpdate: true,
+                  lastSuccessfulCheckAt: null,
+                  release: null,
+                  downloadedBytes: 0,
+                  totalBytes: null,
+                  error: null,
+                  appliedVersion: null,
+                  pendingInstalledVersion: null,
+                };
               if (cmd === 'set_resource_settings') {
                 settings = args.settings;
                 return { snapshot: { revision: 2, settings }, runningWork: 0, recoveryError: null };

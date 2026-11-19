@@ -15,6 +15,15 @@ on:
         description: Release branch used to validate the version
         type: string
         required: true
+      signed_release:
+        description: Build updater artifacts only after a trusted merge
+        type: boolean
+        default: false
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -67,8 +76,32 @@ jobs:
       - run: pnpm lint
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
-      - name: Build ad-hoc signed DMG
+      - name: Configure signed release
+        if: inputs.signed_release
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: python3 .github/scripts/configure-updater.py /tmp/aequo-updater.json
+
+      - name: Build verification DMG without release secrets
+        if: ${{ !inputs.signed_release }}
         run: pnpm tauri build --target aarch64-apple-darwin --bundles app,dmg --ci -- --locked
+
+      - name: Build signed release artifacts
+        if: inputs.signed_release
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          pnpm tauri build --config /tmp/aequo-updater.json --target aarch64-apple-darwin --bundles app,dmg --ci -- --locked
+
+      - name: Verify updater signature and signed version
+        if: inputs.signed_release
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')
+          node .github/scripts/verify-update.mjs src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Aequo.app.tar.gz src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Aequo.app.tar.gz.sig "$version"
 
       - name: Verify architecture and ad-hoc signature
         shell: bash
@@ -86,5 +119,15 @@ jobs:
         with:
           name: macos-aarch64-dmg
           path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.signed_release
+        with:
+          name: macos-aarch64-updater
+          path: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: error
           retention-days: 7

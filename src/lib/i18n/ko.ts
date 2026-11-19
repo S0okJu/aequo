@@ -3,6 +3,61 @@ import type { Message, MessageKey } from './en';
 // Korean UI strings. Typed as a full Record so a key added to en.ts without
 // a translation here fails type-checking.
 const ko: Record<MessageKey, Message> = {
+  'updates.title': '업데이트',
+  'updates.current': '현재 버전',
+  'updates.auto': '자동 업데이트',
+  'updates.autoHint':
+    '새 버전을 자동으로 확인하고 설치합니다. 재시작은 직접 선택합니다. 이미 시작한 앱 교체는 설정을 꺼도 중단하지 않습니다.',
+  'updates.status': '업데이트 상태',
+  'updates.checked': '마지막 확인: {date}',
+  'updates.neverChecked': '아직 확인하지 않았습니다.',
+  'updates.check': '지금 확인',
+  'updates.unavailable': '업데이트는 서명키가 설정된 릴리스 빌드에서 사용할 수 있습니다.',
+  'updates.newVersion': '새 버전: {version}',
+  'updates.releaseNotes': 'GitHub 릴리스 보기',
+  'updates.install': '업데이트 설치',
+  'updates.downloadProgress': '업데이트 다운로드 진행률',
+  'updates.restart': '재시작하여 적용',
+  'updates.later': '나중에',
+  'updates.found': 'Aequo {version} 업데이트가 있습니다.',
+  'updates.installed': '{version} 설치 완료. 재시작하면 적용됩니다.',
+  'updates.applied': 'Aequo가 {version}(으)로 업데이트되었습니다.',
+  'updates.phase.idle': '미확인',
+  'updates.phase.checking': '확인 중…',
+  'updates.phase.up_to_date': '최신 버전입니다',
+  'updates.phase.available': '업데이트 가능',
+  'updates.phase.waiting_for_idle': '작업이 끝나면 업데이트합니다',
+  'updates.phase.downloading': '다운로드 중…',
+  'updates.phase.verifying': '서명 검증 중…',
+  'updates.phase.installing': '설치 중…',
+  'updates.phase.restart_required': '재시작하면 업데이트가 적용됩니다',
+  'updates.phase.error': '업데이트를 완료하지 못했습니다',
+  'updates.error.network':
+    '릴리스 서버에 연결할 수 없습니다. 네트워크를 확인하고 다시 시도해 주세요.',
+  'updates.error.metadata':
+    '릴리스 정보가 올바르지 않거나 이 Mac을 지원하지 않습니다. 나중에 다시 확인해 주세요.',
+  'updates.error.signature':
+    '서명 검증에 실패하여 설치하지 않았습니다. 새 릴리스를 확인하거나 공식 DMG로 수동 설치해 주세요.',
+  'updates.error.tooLarge':
+    '업데이트 파일이 다운로드 한도를 초과합니다. 공식 DMG로 수동 설치해 주세요.',
+  'updates.error.storage': '업데이트 설정을 저장할 수 없습니다. 디스크 여유 공간을 확인해 주세요.',
+  'updates.error.rateLimited': '다시 확인하려면 30초 기다려 주세요.',
+  'updates.error.disabled':
+    '자동 업데이트가 꺼졌습니다. 업데이트 설치 버튼으로 진행할 수 있습니다.',
+  'updates.error.workActive': 'AI 응답 또는 저장 작업이 끝난 후 재시작해 주세요.',
+  'updates.error.draftActive': '작성 중인 내용을 전송·저장하거나 닫은 후 재시작해 주세요.',
+  'updates.error.location':
+    'Aequo를 DMG에서 Applications 폴더로 옮긴 뒤 실행하여 업데이트해 주세요.',
+  'updates.error.permission':
+    '앱을 교체할 권한이 없습니다. 쓰기 권한을 확인하거나 공식 DMG로 수동 설치해 주세요.',
+  'updates.error.install':
+    '설치에 실패했습니다. 디스크 공간과 권한을 확인하고 재시도하거나 공식 DMG로 설치해 주세요.',
+  'updates.error.restore':
+    '설치와 이전 앱 복원에 실패했습니다. 라이브러리는 유지하고 공식 DMG로 Aequo를 다시 설치해 주세요.',
+  'updates.error.notApplied':
+    '설치한 업데이트가 적용되지 않았습니다. 다시 확인하거나 공식 DMG로 설치해 주세요.',
+  'updates.error.checkRequired': '설치 전에 업데이트를 다시 확인해 주세요.',
+
   'ai.welcome': '이 글을 어떻게 도와드릴까요?',
   'ai.welcomeMultiple': '여러 글을 함께 살펴볼까요?',
   'ai.welcomeHint': '아래 작업으로 시작하거나, 궁금한 내용을 직접 질문하세요.',

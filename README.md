@@ -45,6 +45,10 @@ Available for **macOS on Apple Silicon**.
 
 Current builds are ad-hoc signed and are not notarized by Apple. If macOS blocks the first launch, attempt to open the app, then use System Settings → Privacy & Security → Open Anyway.
 
+Starting with v1.0.1, release builds check GitHub Releases and automatically download, verify, and install stable updates. You choose when to restart. In Settings → General → Updates you can see the running version, release notes, progress, and errors, check manually, or turn automatic updates off. Updates are deferred while AI or annotation saves are running; restarting also requires finishing or discarding drafts.
+
+v1.0.0 users must install v1.0.1 from the DMG once to enable in-app updates. Updates contact GitHub and its release asset infrastructure; your library and AI prompts are not included. Development and verification builds without the release signing configuration do not run the updater.
+
 ## Getting started
 
 1. **Add a feed or website.** Enter a feed URL or a website address. If the site doesn’t offer a feed, Aequo can automatically build one from its article listings.
@@ -54,6 +58,8 @@ Current builds are ad-hoc signed and are not notarized by Apple. If macOS blocks
 
 ## Releasing
 
-Push a release branch such as `release/v1.0.0` and open a PR targeting `main`. CI runs tests, checks, and an Apple Silicon DMG build. After that PR is merged, the release workflow validates and builds the exact merged commit, then publishes its DMG and SHA-256 checksum to GitHub Releases. Commit messages do not control publication.
+Push a release branch such as `release/v1.0.1` and open a PR targeting `main`. CI runs tests, checks, and an Apple Silicon verification DMG build without release secrets. After that PR is merged, the release workflow validates and builds the exact merged commit with the updater signing key, then publishes its DMG, updater archive, signature, static manifest, and SHA-256 checksums to GitHub Releases. Commit messages do not control publication.
 
 The release tag comes from the app version, not the commit message. Keep the versions in `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the app entry in `src-tauri/Cargo.lock` equal. The release branch version must match these versions. Bump them together for each new release; an existing version tag pointing to another commit is rejected.
+
+See [updater signing and release operations](scripts/UPDATER_OPERATIONS.md) for key storage, CI configuration, local release builds, verification, and recovery.

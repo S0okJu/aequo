@@ -3,6 +3,7 @@
   import SettingsGroup from './SettingsGroup.svelte';
   import SettingsGrid from './SettingsGrid.svelte';
   import SettingsRow from './SettingsRow.svelte';
+  import SettingsUpdates from './SettingsUpdates.svelte';
   import { applyThemePreference, getThemePreference, type ThemePreference } from '$lib/theme';
   import {
     getLocalePreference,
@@ -73,4 +74,5 @@
       />
     </SettingsRow>
   </SettingsGroup>
+  <SettingsUpdates />
 </SettingsGrid>
