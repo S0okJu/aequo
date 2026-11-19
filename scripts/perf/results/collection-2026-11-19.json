@@ -1,0 +1,1260 @@
+{
+  "source_sha256": {
+    "src-tauri/src/commands/add_feed.rs": "cc3c80a00ffffe5df6f8942d23b163ceefce53e8f0363ebdc573c3ebe064eb28",
+    "src-tauri/src/db/collection.rs": "69287c336cb8eab0ce5e7822d1459ca2654eeaa5aa06d5e60f9fe41e68c34276",
+    "src-tauri/src/db/repository.rs": "5f3d7e786ce4bb78ea2239fd8fff88825ad2c57e3fbda5190418e5ebe995d7b2",
+    "src-tauri/src/db/schema.rs": "bf2c1dddd47337dc4bfee9793416d651e999e50efd123e8771415db87c2868a1",
+    "src-tauri/src/db/resources.rs": "5015428bf735f60bff1208dbb6482501567345559b4a5dcf0b4f167be0cb1248",
+    "src-tauri/src/fetch/parser.rs": "3a403aaff576eab561fcff36ded73e151c45b5c5618d035faf187accf5683a4d",
+    "src-tauri/src/fetch/enrichment.rs": "a0fa7af83bed05d8d054d3f5ec03a176e8814ff9e7591a9056b1ccd180703fae",
+    "src-tauri/src/resource_policy.rs": "0b71ffa88f22e4d3ee94c5a96dbd9398ecba7e6d183be7138c788d79c8b971d0"
+  },
+  "platform": [
+    "Darwin",
+    "27.0.0",
+    "arm64"
+  ],
+  "binary_sha256": "ad74117ff6229e54f3cb34e096b53c298e3468cc9ee3780abbff06231597ee31",
+  "command": [
+    "scripts/perf/collection.py",
+    "src-tauri/target/debug/deps/aequo_lib-e961aace7011e94e",
+    "scripts/perf/results/collection-2026-11-19.json"
+  ],
+  "build": "debug lib test, isolated processes",
+  "summary": [
+    {
+      "feeds": 1,
+      "variant": "legacy",
+      "elapsed_ms": {
+        "median": 193.208125,
+        "min": 191.968083,
+        "max": 194.075333
+      },
+      "process_cpu_seconds": {
+        "median": 0.06999999999999999,
+        "min": 0.06999999999999999,
+        "max": 0.06999999999999999
+      },
+      "process_peak_rss_bytes": {
+        "median": 29655040,
+        "min": 29622272,
+        "max": 30113792
+      },
+      "db_bytes": {
+        "median": 368640,
+        "min": 368640,
+        "max": 368640
+      },
+      "rows": {
+        "median": 50,
+        "min": 50,
+        "max": 50
+      },
+      "body_bytes": {
+        "median": 63792,
+        "min": 63792,
+        "max": 63792
+      },
+      "exclusions": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "identity_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "article_requests": {
+        "median": 8,
+        "min": 8,
+        "max": 8
+      },
+      "feed_requests": {
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "feed_response_bytes": {
+        "median": 6696,
+        "min": 6696,
+        "max": 6696
+      },
+      "article_response_bytes": {
+        "median": 63896,
+        "min": 63896,
+        "max": 63896
+      }
+    },
+    {
+      "feeds": 1,
+      "variant": "limit",
+      "elapsed_ms": {
+        "median": 190.375042,
+        "min": 188.837375,
+        "max": 191.53704199999999
+      },
+      "process_cpu_seconds": {
+        "median": 0.060000000000000005,
+        "min": 0.060000000000000005,
+        "max": 0.060000000000000005
+      },
+      "process_peak_rss_bytes": {
+        "median": 29753344,
+        "min": 29229056,
+        "max": 30212096
+      },
+      "db_bytes": {
+        "median": 299008,
+        "min": 299008,
+        "max": 299008
+      },
+      "rows": {
+        "median": 10,
+        "min": 10,
+        "max": 10
+      },
+      "body_bytes": {
+        "median": 63792,
+        "min": 63792,
+        "max": 63792
+      },
+      "exclusions": {
+        "median": 40,
+        "min": 40,
+        "max": 40
+      },
+      "identity_bytes": {
+        "median": 2560,
+        "min": 2560,
+        "max": 2560
+      },
+      "article_requests": {
+        "median": 8,
+        "min": 8,
+        "max": 8
+      },
+      "feed_requests": {
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "feed_response_bytes": {
+        "median": 6696,
+        "min": 6696,
+        "max": 6696
+      },
+      "article_response_bytes": {
+        "median": 63896,
+        "min": 63896,
+        "max": 63896
+      }
+    },
+    {
+      "feeds": 1,
+      "variant": "prefetch_off",
+      "elapsed_ms": {
+        "median": 24.708875000000003,
+        "min": 23.352708,
+        "max": 37.432375
+      },
+      "process_cpu_seconds": {
+        "median": 0.04,
+        "min": 0.03,
+        "max": 0.04
+      },
+      "process_peak_rss_bytes": {
+        "median": 27262976,
+        "min": 27197440,
+        "max": 27721728
+      },
+      "db_bytes": {
+        "median": 143360,
+        "min": 143360,
+        "max": 143360
+      },
+      "rows": {
+        "median": 50,
+        "min": 50,
+        "max": 50
+      },
+      "body_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "exclusions": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "identity_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "article_requests": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "feed_requests": {
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "feed_response_bytes": {
+        "median": 6696,
+        "min": 6696,
+        "max": 6696
+      },
+      "article_response_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    {
+      "feeds": 1,
+      "variant": "both",
+      "elapsed_ms": {
+        "median": 22.72225,
+        "min": 20.922084,
+        "max": 23.435625
+      },
+      "process_cpu_seconds": {
+        "median": 0.03,
+        "min": 0.02,
+        "max": 0.04
+      },
+      "process_peak_rss_bytes": {
+        "median": 27115520,
+        "min": 27033600,
+        "max": 27459584
+      },
+      "db_bytes": {
+        "median": 126976,
+        "min": 126976,
+        "max": 126976
+      },
+      "rows": {
+        "median": 10,
+        "min": 10,
+        "max": 10
+      },
+      "body_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "exclusions": {
+        "median": 40,
+        "min": 40,
+        "max": 40
+      },
+      "identity_bytes": {
+        "median": 2560,
+        "min": 2560,
+        "max": 2560
+      },
+      "article_requests": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "feed_requests": {
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "feed_response_bytes": {
+        "median": 6696,
+        "min": 6696,
+        "max": 6696
+      },
+      "article_response_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    {
+      "feeds": 20,
+      "variant": "legacy",
+      "elapsed_ms": {
+        "median": 3662.3571660000002,
+        "min": 3627.7127920000003,
+        "max": 3864.776875
+      },
+      "process_cpu_seconds": {
+        "median": 0.7699999999999999,
+        "min": 0.76,
+        "max": 1.07
+      },
+      "process_peak_rss_bytes": {
+        "median": 34603008,
+        "min": 34373632,
+        "max": 35012608
+      },
+      "db_bytes": {
+        "median": 3293184,
+        "min": 3293184,
+        "max": 3293184
+      },
+      "rows": {
+        "median": 1000,
+        "min": 1000,
+        "max": 1000
+      },
+      "body_bytes": {
+        "median": 1275840,
+        "min": 1275840,
+        "max": 1275840
+      },
+      "exclusions": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "identity_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "article_requests": {
+        "median": 160,
+        "min": 160,
+        "max": 160
+      },
+      "feed_requests": {
+        "median": 20,
+        "min": 20,
+        "max": 20
+      },
+      "feed_response_bytes": {
+        "median": 133920,
+        "min": 133920,
+        "max": 133920
+      },
+      "article_response_bytes": {
+        "median": 1277920,
+        "min": 1277920,
+        "max": 1277920
+      }
+    },
+    {
+      "feeds": 20,
+      "variant": "limit",
+      "elapsed_ms": {
+        "median": 3710.632834,
+        "min": 3583.949375,
+        "max": 3803.6064579999997
+      },
+      "process_cpu_seconds": {
+        "median": 0.9199999999999999,
+        "min": 0.7,
+        "max": 1.02
+      },
+      "process_peak_rss_bytes": {
+        "median": 34701312,
+        "min": 34635776,
+        "max": 34963456
+      },
+      "db_bytes": {
+        "median": 3366912,
+        "min": 3366912,
+        "max": 3366912
+      },
+      "rows": {
+        "median": 200,
+        "min": 200,
+        "max": 200
+      },
+      "body_bytes": {
+        "median": 1275840,
+        "min": 1275840,
+        "max": 1275840
+      },
+      "exclusions": {
+        "median": 800,
+        "min": 800,
+        "max": 800
+      },
+      "identity_bytes": {
+        "median": 51200,
+        "min": 51200,
+        "max": 51200
+      },
+      "article_requests": {
+        "median": 160,
+        "min": 160,
+        "max": 160
+      },
+      "feed_requests": {
+        "median": 20,
+        "min": 20,
+        "max": 20
+      },
+      "feed_response_bytes": {
+        "median": 133920,
+        "min": 133920,
+        "max": 133920
+      },
+      "article_response_bytes": {
+        "median": 1277920,
+        "min": 1277920,
+        "max": 1277920
+      }
+    },
+    {
+      "feeds": 20,
+      "variant": "prefetch_off",
+      "elapsed_ms": {
+        "median": 155.362792,
+        "min": 152.330875,
+        "max": 164.977666
+      },
+      "process_cpu_seconds": {
+        "median": 0.16,
+        "min": 0.16,
+        "max": 0.16999999999999998
+      },
+      "process_peak_rss_bytes": {
+        "median": 28000256,
+        "min": 27869184,
+        "max": 28262400
+      },
+      "db_bytes": {
+        "median": 491520,
+        "min": 491520,
+        "max": 491520
+      },
+      "rows": {
+        "median": 1000,
+        "min": 1000,
+        "max": 1000
+      },
+      "body_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "exclusions": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "identity_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "article_requests": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "feed_requests": {
+        "median": 20,
+        "min": 20,
+        "max": 20
+      },
+      "feed_response_bytes": {
+        "median": 133920,
+        "min": 133920,
+        "max": 133920
+      },
+      "article_response_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    {
+      "feeds": 20,
+      "variant": "both",
+      "elapsed_ms": {
+        "median": 105.300417,
+        "min": 102.775375,
+        "max": 116.442875
+      },
+      "process_cpu_seconds": {
+        "median": 0.11,
+        "min": 0.11,
+        "max": 0.12
+      },
+      "process_peak_rss_bytes": {
+        "median": 27705344,
+        "min": 27590656,
+        "max": 27820032
+      },
+      "db_bytes": {
+        "median": 262144,
+        "min": 262144,
+        "max": 262144
+      },
+      "rows": {
+        "median": 200,
+        "min": 200,
+        "max": 200
+      },
+      "body_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "exclusions": {
+        "median": 800,
+        "min": 800,
+        "max": 800
+      },
+      "identity_bytes": {
+        "median": 51200,
+        "min": 51200,
+        "max": 51200
+      },
+      "article_requests": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "feed_requests": {
+        "median": 20,
+        "min": 20,
+        "max": 20
+      },
+      "feed_response_bytes": {
+        "median": 133920,
+        "min": 133920,
+        "max": 133920
+      },
+      "article_response_bytes": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      }
+    }
+  ],
+  "samples": [
+    {
+      "article_requests": 8,
+      "article_response_bytes": 63896,
+      "body_bytes": 63792,
+      "db_bytes": 368640,
+      "elapsed_ms": 192.10591699999998,
+      "exclusions": 0,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 0,
+      "rows": 50,
+      "variant": "legacy",
+      "repeat": 1,
+      "process_cpu_seconds": 0.06999999999999999,
+      "process_peak_rss_bytes": 29622272,
+      "time_stderr": "        0.21 real         0.06 user         0.01 sys\n            29622272  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2108  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  18  messages sent\n                  27  messages received\n                   0  signals received\n                  44  voluntary context switches\n                 177  involuntary context switches\n           608024835  instructions retired\n           207848871  cycles elapsed\n             9454168  peak memory footprint\n"
+    },
+    {
+      "article_requests": 8,
+      "article_response_bytes": 63896,
+      "body_bytes": 63792,
+      "db_bytes": 299008,
+      "elapsed_ms": 190.29175,
+      "exclusions": 40,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 2560,
+      "rows": 10,
+      "variant": "limit",
+      "repeat": 1,
+      "process_cpu_seconds": 0.060000000000000005,
+      "process_peak_rss_bytes": 29605888,
+      "time_stderr": "        0.21 real         0.05 user         0.01 sys\n            29605888  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2108  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  18  messages sent\n                  27  messages received\n                   0  signals received\n                  38  voluntary context switches\n                 161  involuntary context switches\n           583809470  instructions retired\n           195270197  cycles elapsed\n             9388608  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 143360,
+      "elapsed_ms": 24.708875000000003,
+      "exclusions": 0,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 0,
+      "rows": 50,
+      "variant": "prefetch_off",
+      "repeat": 1,
+      "process_cpu_seconds": 0.04,
+      "process_peak_rss_bytes": 27197440,
+      "time_stderr": "        0.04 real         0.03 user         0.01 sys\n            27197440  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1959  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   2  messages sent\n                   3  messages received\n                   0  signals received\n                  43  voluntary context switches\n                  70  involuntary context switches\n           340598831  instructions retired\n           116989408  cycles elapsed\n             7979608  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 126976,
+      "elapsed_ms": 22.72225,
+      "exclusions": 40,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 2560,
+      "rows": 10,
+      "variant": "both",
+      "repeat": 1,
+      "process_cpu_seconds": 0.04,
+      "process_peak_rss_bytes": 27115520,
+      "time_stderr": "        0.04 real         0.03 user         0.01 sys\n            27115520  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1950  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   2  messages sent\n                   3  messages received\n                   0  signals received\n                  44  voluntary context switches\n                  66  involuntary context switches\n           323022212  instructions retired\n           110330506  cycles elapsed\n             7782976  peak memory footprint\n"
+    },
+    {
+      "article_requests": 8,
+      "article_response_bytes": 63896,
+      "body_bytes": 63792,
+      "db_bytes": 299008,
+      "elapsed_ms": 190.375042,
+      "exclusions": 40,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 2560,
+      "rows": 10,
+      "variant": "limit",
+      "repeat": 2,
+      "process_cpu_seconds": 0.060000000000000005,
+      "process_peak_rss_bytes": 29229056,
+      "time_stderr": "        0.21 real         0.05 user         0.01 sys\n            29229056  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2083  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  18  messages sent\n                  27  messages received\n                   0  signals received\n                  42  voluntary context switches\n                 125  involuntary context switches\n           584051732  instructions retired\n           190688333  cycles elapsed\n             9011776  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 143360,
+      "elapsed_ms": 37.432375,
+      "exclusions": 0,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 0,
+      "rows": 50,
+      "variant": "prefetch_off",
+      "repeat": 2,
+      "process_cpu_seconds": 0.04,
+      "process_peak_rss_bytes": 27443200,
+      "time_stderr": "        0.06 real         0.03 user         0.01 sys\n            27443200  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1974  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   2  messages sent\n                   3  messages received\n                   0  signals received\n                  41  voluntary context switches\n                 207  involuntary context switches\n           343186636  instructions retired\n           123171064  cycles elapsed\n             8225368  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 126976,
+      "elapsed_ms": 23.048125,
+      "exclusions": 40,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 2560,
+      "rows": 10,
+      "variant": "both",
+      "repeat": 2,
+      "process_cpu_seconds": 0.04,
+      "process_peak_rss_bytes": 27033600,
+      "time_stderr": "        0.05 real         0.03 user         0.01 sys\n            27033600  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1949  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   2  messages sent\n                   3  messages received\n                   0  signals received\n                  40  voluntary context switches\n                 116  involuntary context switches\n           323418720  instructions retired\n           118799154  cycles elapsed\n             7783000  peak memory footprint\n"
+    },
+    {
+      "article_requests": 8,
+      "article_response_bytes": 63896,
+      "body_bytes": 63792,
+      "db_bytes": 368640,
+      "elapsed_ms": 191.968083,
+      "exclusions": 0,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 0,
+      "rows": 50,
+      "variant": "legacy",
+      "repeat": 2,
+      "process_cpu_seconds": 0.06999999999999999,
+      "process_peak_rss_bytes": 29655040,
+      "time_stderr": "        0.21 real         0.06 user         0.01 sys\n            29655040  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2110  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  18  messages sent\n                  27  messages received\n                   0  signals received\n                  41  voluntary context switches\n                 139  involuntary context switches\n           609625937  instructions retired\n           206995543  cycles elapsed\n             9470528  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 143360,
+      "elapsed_ms": 24.467083000000002,
+      "exclusions": 0,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 0,
+      "rows": 50,
+      "variant": "prefetch_off",
+      "repeat": 3,
+      "process_cpu_seconds": 0.04,
+      "process_peak_rss_bytes": 27721728,
+      "time_stderr": "        0.04 real         0.03 user         0.01 sys\n            27721728  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1994  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   2  messages sent\n                   3  messages received\n                   0  signals received\n                  45  voluntary context switches\n                  29  involuntary context switches\n           340245306  instructions retired\n           115970110  cycles elapsed\n             8487488  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 126976,
+      "elapsed_ms": 23.435625,
+      "exclusions": 40,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 2560,
+      "rows": 10,
+      "variant": "both",
+      "repeat": 3,
+      "process_cpu_seconds": 0.03,
+      "process_peak_rss_bytes": 27213824,
+      "time_stderr": "        0.04 real         0.03 user         0.00 sys\n            27213824  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1961  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   2  messages sent\n                   3  messages received\n                   0  signals received\n                  42  voluntary context switches\n                  48  involuntary context switches\n           321661332  instructions retired\n           109519907  cycles elapsed\n             7963224  peak memory footprint\n"
+    },
+    {
+      "article_requests": 8,
+      "article_response_bytes": 63896,
+      "body_bytes": 63792,
+      "db_bytes": 368640,
+      "elapsed_ms": 193.208125,
+      "exclusions": 0,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 0,
+      "rows": 50,
+      "variant": "legacy",
+      "repeat": 3,
+      "process_cpu_seconds": 0.06999999999999999,
+      "process_peak_rss_bytes": 29753344,
+      "time_stderr": "        0.21 real         0.06 user         0.01 sys\n            29753344  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2115  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  18  messages sent\n                  27  messages received\n                   0  signals received\n                  42  voluntary context switches\n                 117  involuntary context switches\n           607055659  instructions retired\n           201842250  cycles elapsed\n             9552424  peak memory footprint\n"
+    },
+    {
+      "article_requests": 8,
+      "article_response_bytes": 63896,
+      "body_bytes": 63792,
+      "db_bytes": 299008,
+      "elapsed_ms": 188.837375,
+      "exclusions": 40,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 2560,
+      "rows": 10,
+      "variant": "limit",
+      "repeat": 3,
+      "process_cpu_seconds": 0.060000000000000005,
+      "process_peak_rss_bytes": 30212096,
+      "time_stderr": "        0.20 real         0.05 user         0.01 sys\n            30212096  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2142  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  18  messages sent\n                  27  messages received\n                   0  signals received\n                  43  voluntary context switches\n                 116  involuntary context switches\n           583620901  instructions retired\n           189438813  cycles elapsed\n            10011224  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 126976,
+      "elapsed_ms": 20.922084,
+      "exclusions": 40,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 2560,
+      "rows": 10,
+      "variant": "both",
+      "repeat": 4,
+      "process_cpu_seconds": 0.02,
+      "process_peak_rss_bytes": 27115520,
+      "time_stderr": "        0.04 real         0.02 user         0.00 sys\n            27115520  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1954  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   2  messages sent\n                   3  messages received\n                   0  signals received\n                  42  voluntary context switches\n                  27  involuntary context switches\n           320746337  instructions retired\n           101301077  cycles elapsed\n             7864920  peak memory footprint\n"
+    },
+    {
+      "article_requests": 8,
+      "article_response_bytes": 63896,
+      "body_bytes": 63792,
+      "db_bytes": 368640,
+      "elapsed_ms": 194.075333,
+      "exclusions": 0,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 0,
+      "rows": 50,
+      "variant": "legacy",
+      "repeat": 4,
+      "process_cpu_seconds": 0.06999999999999999,
+      "process_peak_rss_bytes": 30113792,
+      "time_stderr": "        0.21 real         0.06 user         0.01 sys\n            30113792  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2136  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  18  messages sent\n                  27  messages received\n                   0  signals received\n                  43  voluntary context switches\n                 144  involuntary context switches\n           606650167  instructions retired\n           198876574  cycles elapsed\n             9945688  peak memory footprint\n"
+    },
+    {
+      "article_requests": 8,
+      "article_response_bytes": 63896,
+      "body_bytes": 63792,
+      "db_bytes": 299008,
+      "elapsed_ms": 191.377125,
+      "exclusions": 40,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 2560,
+      "rows": 10,
+      "variant": "limit",
+      "repeat": 4,
+      "process_cpu_seconds": 0.060000000000000005,
+      "process_peak_rss_bytes": 29753344,
+      "time_stderr": "        0.21 real         0.05 user         0.01 sys\n            29753344  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2116  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  18  messages sent\n                  27  messages received\n                   0  signals received\n                  38  voluntary context switches\n                 143  involuntary context switches\n           582987477  instructions retired\n           192830045  cycles elapsed\n             9552472  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 143360,
+      "elapsed_ms": 24.887042,
+      "exclusions": 0,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 0,
+      "rows": 50,
+      "variant": "prefetch_off",
+      "repeat": 4,
+      "process_cpu_seconds": 0.03,
+      "process_peak_rss_bytes": 27230208,
+      "time_stderr": "        0.04 real         0.03 user         0.00 sys\n            27230208  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1960  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   2  messages sent\n                   3  messages received\n                   0  signals received\n                  39  voluntary context switches\n                  51  involuntary context switches\n           339932117  instructions retired\n           112448721  cycles elapsed\n             8012376  peak memory footprint\n"
+    },
+    {
+      "article_requests": 8,
+      "article_response_bytes": 63896,
+      "body_bytes": 63792,
+      "db_bytes": 368640,
+      "elapsed_ms": 193.450959,
+      "exclusions": 0,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 0,
+      "rows": 50,
+      "variant": "legacy",
+      "repeat": 5,
+      "process_cpu_seconds": 0.06999999999999999,
+      "process_peak_rss_bytes": 29638656,
+      "time_stderr": "        0.21 real         0.06 user         0.01 sys\n            29638656  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2107  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  18  messages sent\n                  27  messages received\n                   0  signals received\n                  42  voluntary context switches\n                 113  involuntary context switches\n           606935514  instructions retired\n           194679995  cycles elapsed\n             9454144  peak memory footprint\n"
+    },
+    {
+      "article_requests": 8,
+      "article_response_bytes": 63896,
+      "body_bytes": 63792,
+      "db_bytes": 299008,
+      "elapsed_ms": 191.53704199999999,
+      "exclusions": 40,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 2560,
+      "rows": 10,
+      "variant": "limit",
+      "repeat": 5,
+      "process_cpu_seconds": 0.060000000000000005,
+      "process_peak_rss_bytes": 29802496,
+      "time_stderr": "        0.21 real         0.05 user         0.01 sys\n            29802496  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2118  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  18  messages sent\n                  27  messages received\n                   0  signals received\n                  39  voluntary context switches\n                 156  involuntary context switches\n           583420958  instructions retired\n           192029976  cycles elapsed\n             9601624  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 143360,
+      "elapsed_ms": 23.352708,
+      "exclusions": 0,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 0,
+      "rows": 50,
+      "variant": "prefetch_off",
+      "repeat": 5,
+      "process_cpu_seconds": 0.03,
+      "process_peak_rss_bytes": 27262976,
+      "time_stderr": "        0.04 real         0.03 user         0.00 sys\n            27262976  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1963  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   2  messages sent\n                   3  messages received\n                   0  signals received\n                  42  voluntary context switches\n                  30  involuntary context switches\n           339810116  instructions retired\n           108121826  cycles elapsed\n             8045144  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 126976,
+      "elapsed_ms": 21.692667,
+      "exclusions": 40,
+      "feed_requests": 1,
+      "feed_response_bytes": 6696,
+      "feeds": 1,
+      "identity_bytes": 2560,
+      "rows": 10,
+      "variant": "both",
+      "repeat": 5,
+      "process_cpu_seconds": 0.03,
+      "process_peak_rss_bytes": 27459584,
+      "time_stderr": "        0.04 real         0.03 user         0.00 sys\n            27459584  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1976  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   2  messages sent\n                   3  messages received\n                   0  signals received\n                  39  voluntary context switches\n                  48  involuntary context switches\n           321307927  instructions retired\n           107835970  cycles elapsed\n             8208984  peak memory footprint\n"
+    },
+    {
+      "article_requests": 160,
+      "article_response_bytes": 1277920,
+      "body_bytes": 1275840,
+      "db_bytes": 3293184,
+      "elapsed_ms": 3643.693958,
+      "exclusions": 0,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 0,
+      "rows": 1000,
+      "variant": "legacy",
+      "repeat": 1,
+      "process_cpu_seconds": 0.76,
+      "process_peak_rss_bytes": 34586624,
+      "time_stderr": "        3.66 real         0.68 user         0.08 sys\n            34586624  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2410  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 360  messages sent\n                 521  messages received\n                   0  signals received\n                 141  voluntary context switches\n                1968  involuntary context switches\n          4874547456  instructions retired\n          1718151166  cycles elapsed\n            14434928  peak memory footprint\n"
+    },
+    {
+      "article_requests": 160,
+      "article_response_bytes": 1277920,
+      "body_bytes": 1275840,
+      "db_bytes": 3366912,
+      "elapsed_ms": 3710.632834,
+      "exclusions": 800,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 51200,
+      "rows": 200,
+      "variant": "limit",
+      "repeat": 1,
+      "process_cpu_seconds": 0.9199999999999999,
+      "process_peak_rss_bytes": 34635776,
+      "time_stderr": "        3.73 real         0.82 user         0.10 sys\n            34635776  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2413  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 360  messages sent\n                 521  messages received\n                   0  signals received\n                  92  voluntary context switches\n                1839  involuntary context switches\n          4457880187  instructions retired\n          1602090238  cycles elapsed\n            14434928  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 491520,
+      "elapsed_ms": 162.200542,
+      "exclusions": 0,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 0,
+      "rows": 1000,
+      "variant": "prefetch_off",
+      "repeat": 1,
+      "process_cpu_seconds": 0.16,
+      "process_peak_rss_bytes": 28114944,
+      "time_stderr": "        0.18 real         0.15 user         0.01 sys\n            28114944  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2014  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  40  messages sent\n                  41  messages received\n                   0  signals received\n                  84  voluntary context switches\n                 149  involuntary context switches\n          1370362826  instructions retired\n           458832607  cycles elapsed\n             8897112  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 262144,
+      "elapsed_ms": 107.70629199999999,
+      "exclusions": 800,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 51200,
+      "rows": 200,
+      "variant": "both",
+      "repeat": 1,
+      "process_cpu_seconds": 0.11,
+      "process_peak_rss_bytes": 27820032,
+      "time_stderr": "        0.12 real         0.10 user         0.01 sys\n            27820032  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1997  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  40  messages sent\n                  41  messages received\n                   0  signals received\n                  68  voluntary context switches\n                 171  involuntary context switches\n           952923335  instructions retired\n           332139673  cycles elapsed\n             8536664  peak memory footprint\n"
+    },
+    {
+      "article_requests": 160,
+      "article_response_bytes": 1277920,
+      "body_bytes": 1275840,
+      "db_bytes": 3366912,
+      "elapsed_ms": 3583.949375,
+      "exclusions": 800,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 51200,
+      "rows": 200,
+      "variant": "limit",
+      "repeat": 2,
+      "process_cpu_seconds": 0.7,
+      "process_peak_rss_bytes": 34897920,
+      "time_stderr": "        3.61 real         0.62 user         0.08 sys\n            34897920  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2430  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 360  messages sent\n                 521  messages received\n                   0  signals received\n                  91  voluntary context switches\n                1966  involuntary context switches\n          4456260471  instructions retired\n          1581050700  cycles elapsed\n            14697072  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 491520,
+      "elapsed_ms": 152.842917,
+      "exclusions": 0,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 0,
+      "rows": 1000,
+      "variant": "prefetch_off",
+      "repeat": 2,
+      "process_cpu_seconds": 0.16,
+      "process_peak_rss_bytes": 27983872,
+      "time_stderr": "        0.17 real         0.15 user         0.01 sys\n            27983872  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2008  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  40  messages sent\n                  41  messages received\n                   0  signals received\n                  90  voluntary context switches\n                 134  involuntary context switches\n          1368886389  instructions retired\n           453753772  cycles elapsed\n             8766040  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 262144,
+      "elapsed_ms": 116.442875,
+      "exclusions": 800,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 51200,
+      "rows": 200,
+      "variant": "both",
+      "repeat": 2,
+      "process_cpu_seconds": 0.12,
+      "process_peak_rss_bytes": 27590656,
+      "time_stderr": "        0.13 real         0.11 user         0.01 sys\n            27590656  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1982  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  40  messages sent\n                  41  messages received\n                   0  signals received\n                  66  voluntary context switches\n                 240  involuntary context switches\n           953423080  instructions retired\n           349103901  cycles elapsed\n             8290880  peak memory footprint\n"
+    },
+    {
+      "article_requests": 160,
+      "article_response_bytes": 1277920,
+      "body_bytes": 1275840,
+      "db_bytes": 3293184,
+      "elapsed_ms": 3627.7127920000003,
+      "exclusions": 0,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 0,
+      "rows": 1000,
+      "variant": "legacy",
+      "repeat": 2,
+      "process_cpu_seconds": 0.76,
+      "process_peak_rss_bytes": 34373632,
+      "time_stderr": "        3.65 real         0.68 user         0.08 sys\n            34373632  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2396  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 360  messages sent\n                 521  messages received\n                   0  signals received\n                 137  voluntary context switches\n                1942  involuntary context switches\n          4875177562  instructions retired\n          1716230274  cycles elapsed\n            14221936  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 491520,
+      "elapsed_ms": 164.977666,
+      "exclusions": 0,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 0,
+      "rows": 1000,
+      "variant": "prefetch_off",
+      "repeat": 3,
+      "process_cpu_seconds": 0.16999999999999998,
+      "process_peak_rss_bytes": 28262400,
+      "time_stderr": "        0.18 real         0.15 user         0.02 sys\n            28262400  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2025  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  40  messages sent\n                  41  messages received\n                   0  signals received\n                  94  voluntary context switches\n                 203  involuntary context switches\n          1370327160  instructions retired\n           479565228  cycles elapsed\n             9044568  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 262144,
+      "elapsed_ms": 105.215542,
+      "exclusions": 800,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 51200,
+      "rows": 200,
+      "variant": "both",
+      "repeat": 3,
+      "process_cpu_seconds": 0.11,
+      "process_peak_rss_bytes": 27754496,
+      "time_stderr": "        0.12 real         0.10 user         0.01 sys\n            27754496  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1993  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  40  messages sent\n                  41  messages received\n                   0  signals received\n                  67  voluntary context switches\n                 138  involuntary context switches\n           953075706  instructions retired\n           326054299  cycles elapsed\n             8454720  peak memory footprint\n"
+    },
+    {
+      "article_requests": 160,
+      "article_response_bytes": 1277920,
+      "body_bytes": 1275840,
+      "db_bytes": 3293184,
+      "elapsed_ms": 3662.3571660000002,
+      "exclusions": 0,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 0,
+      "rows": 1000,
+      "variant": "legacy",
+      "repeat": 3,
+      "process_cpu_seconds": 0.7699999999999999,
+      "process_peak_rss_bytes": 35012608,
+      "time_stderr": "        3.68 real         0.69 user         0.08 sys\n            35012608  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2437  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 360  messages sent\n                 521  messages received\n                   0  signals received\n                 140  voluntary context switches\n                1871  involuntary context switches\n          4877565347  instructions retired\n          1673261058  cycles elapsed\n            14844504  peak memory footprint\n"
+    },
+    {
+      "article_requests": 160,
+      "article_response_bytes": 1277920,
+      "body_bytes": 1275840,
+      "db_bytes": 3366912,
+      "elapsed_ms": 3666.6344999999997,
+      "exclusions": 800,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 51200,
+      "rows": 200,
+      "variant": "limit",
+      "repeat": 3,
+      "process_cpu_seconds": 0.83,
+      "process_peak_rss_bytes": 34963456,
+      "time_stderr": "        3.69 real         0.74 user         0.09 sys\n            34963456  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2432  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 360  messages sent\n                 521  messages received\n                   0  signals received\n                  89  voluntary context switches\n                1815  involuntary context switches\n          4458236406  instructions retired\n          1561190037  cycles elapsed\n            14762608  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 262144,
+      "elapsed_ms": 105.300417,
+      "exclusions": 800,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 51200,
+      "rows": 200,
+      "variant": "both",
+      "repeat": 4,
+      "process_cpu_seconds": 0.11,
+      "process_peak_rss_bytes": 27688960,
+      "time_stderr": "        0.12 real         0.10 user         0.01 sys\n            27688960  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1990  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  40  messages sent\n                  41  messages received\n                   0  signals received\n                  68  voluntary context switches\n                 128  involuntary context switches\n           952602336  instructions retired\n           323934663  cycles elapsed\n             8405592  peak memory footprint\n"
+    },
+    {
+      "article_requests": 160,
+      "article_response_bytes": 1277920,
+      "body_bytes": 1275840,
+      "db_bytes": 3293184,
+      "elapsed_ms": 3800.951333,
+      "exclusions": 0,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 0,
+      "rows": 1000,
+      "variant": "legacy",
+      "repeat": 4,
+      "process_cpu_seconds": 0.95,
+      "process_peak_rss_bytes": 34963456,
+      "time_stderr": "        3.82 real         0.85 user         0.10 sys\n            34963456  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2432  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 360  messages sent\n                 521  messages received\n                   0  signals received\n                 140  voluntary context switches\n                1912  involuntary context switches\n          4875982891  instructions retired\n          1751514470  cycles elapsed\n            14811760  peak memory footprint\n"
+    },
+    {
+      "article_requests": 160,
+      "article_response_bytes": 1277920,
+      "body_bytes": 1275840,
+      "db_bytes": 3366912,
+      "elapsed_ms": 3803.6064579999997,
+      "exclusions": 800,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 51200,
+      "rows": 200,
+      "variant": "limit",
+      "repeat": 4,
+      "process_cpu_seconds": 1.01,
+      "process_peak_rss_bytes": 34668544,
+      "time_stderr": "        3.83 real         0.90 user         0.11 sys\n            34668544  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2417  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 360  messages sent\n                 521  messages received\n                   0  signals received\n                 101  voluntary context switches\n                1968  involuntary context switches\n          4461625292  instructions retired\n          1669947864  cycles elapsed\n            14451288  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 491520,
+      "elapsed_ms": 155.362792,
+      "exclusions": 0,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 0,
+      "rows": 1000,
+      "variant": "prefetch_off",
+      "repeat": 4,
+      "process_cpu_seconds": 0.16999999999999998,
+      "process_peak_rss_bytes": 27869184,
+      "time_stderr": "        0.17 real         0.15 user         0.02 sys\n            27869184  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2000  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  40  messages sent\n                  41  messages received\n                   0  signals received\n                  85  voluntary context switches\n                 147  involuntary context switches\n          1370898195  instructions retired\n           461683316  cycles elapsed\n             8651352  peak memory footprint\n"
+    },
+    {
+      "article_requests": 160,
+      "article_response_bytes": 1277920,
+      "body_bytes": 1275840,
+      "db_bytes": 3293184,
+      "elapsed_ms": 3864.776875,
+      "exclusions": 0,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 0,
+      "rows": 1000,
+      "variant": "legacy",
+      "repeat": 5,
+      "process_cpu_seconds": 1.07,
+      "process_peak_rss_bytes": 34603008,
+      "time_stderr": "        3.88 real         0.96 user         0.11 sys\n            34603008  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2411  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 360  messages sent\n                 521  messages received\n                   0  signals received\n                 139  voluntary context switches\n                1818  involuntary context switches\n          4878580434  instructions retired\n          1719801833  cycles elapsed\n            14451312  peak memory footprint\n"
+    },
+    {
+      "article_requests": 160,
+      "article_response_bytes": 1277920,
+      "body_bytes": 1275840,
+      "db_bytes": 3366912,
+      "elapsed_ms": 3784.319584,
+      "exclusions": 800,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 51200,
+      "rows": 200,
+      "variant": "limit",
+      "repeat": 5,
+      "process_cpu_seconds": 1.02,
+      "process_peak_rss_bytes": 34701312,
+      "time_stderr": "        3.80 real         0.91 user         0.11 sys\n            34701312  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2418  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 360  messages sent\n                 521  messages received\n                   0  signals received\n                  94  voluntary context switches\n                1863  involuntary context switches\n          4458827323  instructions retired\n          1629341460  cycles elapsed\n            14500464  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 491520,
+      "elapsed_ms": 152.330875,
+      "exclusions": 0,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 0,
+      "rows": 1000,
+      "variant": "prefetch_off",
+      "repeat": 5,
+      "process_cpu_seconds": 0.16,
+      "process_peak_rss_bytes": 28000256,
+      "time_stderr": "        0.17 real         0.15 user         0.01 sys\n            28000256  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2008  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  40  messages sent\n                  41  messages received\n                   0  signals received\n                  85  voluntary context switches\n                 127  involuntary context switches\n          1369663008  instructions retired\n           451090062  cycles elapsed\n             8782424  peak memory footprint\n"
+    },
+    {
+      "article_requests": 0,
+      "article_response_bytes": 0,
+      "body_bytes": 0,
+      "db_bytes": 262144,
+      "elapsed_ms": 102.775375,
+      "exclusions": 800,
+      "feed_requests": 20,
+      "feed_response_bytes": 133920,
+      "feeds": 20,
+      "identity_bytes": 51200,
+      "rows": 200,
+      "variant": "both",
+      "repeat": 5,
+      "process_cpu_seconds": 0.11,
+      "process_peak_rss_bytes": 27705344,
+      "time_stderr": "        0.12 real         0.10 user         0.01 sys\n            27705344  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1990  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  40  messages sent\n                  41  messages received\n                   0  signals received\n                  67  voluntary context switches\n                 121  involuntary context switches\n           955515413  instructions retired\n           316639005  cycles elapsed\n             8405568  peak memory footprint\n"
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: ['release/**']
+  pull_request:
+    branches: [main, 'release/**']
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact commit to validate and build
+        type: string
+        required: true
+      release_branch:
+        description: Release branch used to validate the version
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Test and build Apple Silicon
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Check release version
+        env:
+          RELEASE_BRANCH: ${{ inputs.release_branch || (github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref) || '' }}
+        run: python3 .github/scripts/release-version.py
+
+      - name: Test release scripts
+        run: python3 -m unittest discover -s .github/tests -v
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm test
+      - run: pnpm build
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - run: pnpm lint
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Build ad-hoc signed DMG
+        run: pnpm tauri build --target aarch64-apple-darwin --bundles app,dmg --ci -- --locked
+
+      - name: Verify architecture and ad-hoc signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Aequo.app"
+          test "$(lipo -archs "$app/Contents/MacOS/aequo")" = arm64
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=4 "$app" 2>&1 | grep -x 'Signature=adhoc'
+          for dmg in src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg; do
+            hdiutil verify "$dmg"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-aarch64-dmg
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 7
