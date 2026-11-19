@@ -4,6 +4,61 @@
 // plural forms (Intl.PluralRules categories) selected by `params.count`.
 
 const en = {
+  'updates.title': 'Updates',
+  'updates.current': 'Current version',
+  'updates.auto': 'Automatic updates',
+  'updates.autoHint':
+    'Automatically check for and install new versions. You choose when to restart. Turning this off will not interrupt an installation already in progress.',
+  'updates.status': 'Update status',
+  'updates.checked': 'Last checked: {date}',
+  'updates.neverChecked': 'No successful check yet.',
+  'updates.check': 'Check now',
+  'updates.unavailable': 'Updates are available in release builds configured with a signing key.',
+  'updates.newVersion': 'New version: {version}',
+  'updates.releaseNotes': 'View release on GitHub',
+  'updates.install': 'Install update',
+  'updates.downloadProgress': 'Update download progress',
+  'updates.restart': 'Restart to apply',
+  'updates.later': 'Later',
+  'updates.found': 'Aequo {version} is available.',
+  'updates.installed': '{version} installed. Restart when you are ready.',
+  'updates.applied': 'Aequo was updated to {version}.',
+  'updates.phase.idle': 'Not checked',
+  'updates.phase.checking': 'Checking…',
+  'updates.phase.up_to_date': 'You are up to date',
+  'updates.phase.available': 'Update available',
+  'updates.phase.waiting_for_idle': 'Waiting for your work to finish',
+  'updates.phase.downloading': 'Downloading…',
+  'updates.phase.verifying': 'Verifying signature…',
+  'updates.phase.installing': 'Installing…',
+  'updates.phase.restart_required': 'Restart to finish updating',
+  'updates.phase.error': 'Update could not finish',
+  'updates.error.network':
+    'Could not reach the release server. Check your connection and try again.',
+  'updates.error.metadata':
+    'The release information is invalid or does not support this Mac. Check again later.',
+  'updates.error.signature':
+    'Signature verification failed. The update was not installed. Check for a new release or install the official DMG manually.',
+  'updates.error.tooLarge':
+    'The update exceeds the download limit. Use the official DMG to update manually.',
+  'updates.error.storage': 'Could not save update settings. Check available disk space.',
+  'updates.error.rateLimited': 'Please wait 30 seconds between checks.',
+  'updates.error.disabled':
+    'Automatic updating was turned off. You can install the update manually.',
+  'updates.error.workActive': 'Finish your AI response or save your work before restarting.',
+  'updates.error.draftActive': 'Send, save, or discard your draft before restarting.',
+  'updates.error.location':
+    'Move Aequo from the DMG into Applications, then open it there to update.',
+  'updates.error.permission':
+    'Aequo cannot replace this app. Check write permissions or install the official DMG manually.',
+  'updates.error.install':
+    'Installation failed. Check disk space and permissions, then retry or install the official DMG.',
+  'updates.error.restore':
+    'Installation and restoration failed. Keep your library and reinstall Aequo using the official DMG.',
+  'updates.error.notApplied':
+    'The installed update was not applied. Check for updates again or use the official DMG.',
+  'updates.error.checkRequired': 'Check for updates before installing.',
+
   'ai.welcome': 'How can I help with this article?',
   'ai.welcomeMultiple': 'Explore these articles together',
   'ai.welcomeHint': 'Start with a quick action, or ask your own question below.',

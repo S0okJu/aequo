@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { updateDraft } from '$lib/updates.svelte';
   import { onMount, tick, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { listen } from '@tauri-apps/api/event';
@@ -131,6 +132,11 @@
   }
   let selectedSessionId = $state<number | null>(null);
   let draft = $state('');
+  const updateDraftToken = Symbol('ai-draft');
+  $effect(() => {
+    updateDraft(updateDraftToken, draft.trim().length > 0);
+  });
+  $effect(() => () => updateDraft(updateDraftToken, false));
   let run = $state<Run | null>(null);
   let loadingMessages = $state(false);
   let updatingContext = $state(false);
@@ -1196,8 +1202,7 @@
               type="button"
               class="ui-option new-chat-option"
               disabled={sending || isEmptyChat}
-              onclick={startNewChat}
-              ><Icon name="plus" size={13} />{t('ai.newChat')}</button
+              onclick={startNewChat}><Icon name="plus" size={13} />{t('ai.newChat')}</button
             >
             <div class="history-tabs">
               <SegmentedControl
@@ -1251,9 +1256,7 @@
                         <span class="history-title">{session.title}</span>
                         <span class="history-meta">
                           <Icon name={PROVIDER_ICONS[session.provider]} size={11} />
-                          {PROVIDER_NAMES[session.provider]} · {formatRelative(
-                            session.updatedAt,
-                          )}
+                          {PROVIDER_NAMES[session.provider]} · {formatRelative(session.updatedAt)}
                         </span>
                       </button>
                       <IconButton

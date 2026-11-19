@@ -6,6 +6,7 @@
   import { applyDocumentLanguage } from '$lib/i18n/index.svelte';
   import { startFeedIconSync } from '$lib/feedIcons.svelte';
   import { startResourceSync } from '$lib/resources.svelte';
+  import { startUpdateSync } from '$lib/updates.svelte';
 
   let { children } = $props();
 
@@ -14,7 +15,9 @@
     applyDocumentLanguage();
     const stopIcons = startFeedIconSync();
     const stopResources = startResourceSync();
+    const stopUpdates = startUpdateSync();
     return () => {
+      stopUpdates();
       stopResources();
       stopIcons();
     };

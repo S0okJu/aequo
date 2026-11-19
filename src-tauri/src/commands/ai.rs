@@ -503,6 +503,7 @@ pub async fn start_ai_message(
     session_id: Option<i64>,
     prompt: String,
 ) -> Result<AiStart, String> {
+    let activity = crate::updater::activity::begin(&app)?;
     validate_provider(&provider)?;
     if scope_label.as_ref().is_some_and(|label| label.len() > 1024) {
         return Err("Scope label is too long.".into());
@@ -557,7 +558,7 @@ pub async fn start_ai_message(
         .map_err(|_| "AI run registry poisoned".to_string())?
         .insert(request_id.clone(), cancel.clone());
 
-    tauri::async_runtime::spawn(stream_run(
+    let stream = stream_run(
         app.clone(),
         request_id.clone(),
         session.id,
@@ -565,7 +566,11 @@ pub async fn start_ai_message(
         child,
         cancel,
         sent_positions,
-    ));
+    );
+    tauri::async_runtime::spawn(async move {
+        let _activity = activity;
+        stream.await;
+    });
 
     Ok(AiStart {
         request_id,

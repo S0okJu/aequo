@@ -6,7 +6,7 @@
 use std::sync::Mutex;
 
 use rusqlite::Connection;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::db;
 
@@ -108,6 +108,7 @@ pub fn list_item_annotations(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn create_annotation(
+    app: AppHandle,
     db_state: State<'_, Mutex<Connection>>,
     item_id: i64,
     kind: String,
@@ -118,6 +119,7 @@ pub fn create_annotation(
     color: Option<String>,
     note: Option<String>,
 ) -> Result<db::Annotation, String> {
+    let _activity = crate::updater::activity::begin(&app)?;
     validate_offsets(start_offset, end_offset)?;
     validate_quoted_text(&quoted_text)?;
     validate_kind_fields(&kind, color.as_deref(), note.as_deref())?;
@@ -154,6 +156,7 @@ pub fn create_annotation(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn update_annotation(
+    app: AppHandle,
     db_state: State<'_, Mutex<Connection>>,
     id: i64,
     kind: String,
@@ -164,6 +167,7 @@ pub fn update_annotation(
     color: Option<String>,
     note: Option<String>,
 ) -> Result<db::Annotation, String> {
+    let _activity = crate::updater::activity::begin(&app)?;
     validate_offsets(start_offset, end_offset)?;
     validate_quoted_text(&quoted_text)?;
     validate_kind_fields(&kind, color.as_deref(), note.as_deref())?;
@@ -194,7 +198,12 @@ pub fn update_annotation(
 }
 
 #[tauri::command]
-pub fn delete_annotation(db_state: State<'_, Mutex<Connection>>, id: i64) -> Result<(), String> {
+pub fn delete_annotation(
+    app: AppHandle,
+    db_state: State<'_, Mutex<Connection>>,
+    id: i64,
+) -> Result<(), String> {
+    let _activity = crate::updater::activity::begin(&app)?;
     let conn = db_state
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;

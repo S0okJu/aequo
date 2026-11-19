@@ -8,9 +8,9 @@ on:
 permissions:
   contents: read
 
-# Serialize retries of the same PR without dropping other queued releases.
+# Stable publication is serialized across versions; the script also rejects regressions.
 concurrency:
-  group: release-macos-${{ github.event.pull_request.number }}
+  group: release-macos-stable
   cancel-in-progress: false
 
 jobs:
@@ -23,9 +23,13 @@ jobs:
     with:
       ref: ${{ github.event.pull_request.merge_commit_sha }}
       release_branch: ${{ github.event.pull_request.head.ref }}
+      signed_release: true
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
   publish:
-    name: Publish verified DMG
+    name: Publish verified app and updater
     needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -47,10 +51,20 @@ jobs:
           name: macos-aarch64-dmg
           path: dist
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-aarch64-updater
+          path: dist
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
         run: bash .github/scripts/publish-release.sh

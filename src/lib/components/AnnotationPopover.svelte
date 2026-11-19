@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { updateDraft } from '$lib/updates.svelte';
   import type { Annotation, AnnotationKind } from '$lib/types';
   import { t } from '$lib/i18n/index.svelte';
 
@@ -42,16 +43,18 @@
   });
 
   const top = $derived(
-    Math.max(
-      MARGIN,
-      Math.min(rect.bottom + MARGIN, window.innerHeight - measuredHeight - MARGIN),
-    ),
+    Math.max(MARGIN, Math.min(rect.bottom + MARGIN, window.innerHeight - measuredHeight - MARGIN)),
   );
   const left = $derived(
     Math.max(MARGIN, Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - MARGIN)),
   );
 
   const dirty = $derived(kind === 'memo' && noteDraft.trim() !== (annotation?.note ?? ''));
+  const updateDraftToken = Symbol('annotation-draft');
+  $effect(() => {
+    updateDraft(updateDraftToken, dirty);
+  });
+  $effect(() => () => updateDraft(updateDraftToken, false));
 
   function save() {
     const trimmed = noteDraft.trim();

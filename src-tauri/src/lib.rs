@@ -5,6 +5,7 @@ mod fetch;
 mod icons;
 mod resource_policy;
 mod scheduler;
+mod updater;
 
 use std::sync::{Arc, Mutex};
 
@@ -14,12 +15,37 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
+            #[cfg(feature = "updater-test")]
+            let app_data_dir = if app.config().identifier == "io.github.s0okju.aequo.updater-test" {
+                std::env::var_os("AEQUO_UPDATE_TEST_DATA_DIR")
+                    .or_else(|| {
+                        option_env!("AEQUO_UPDATE_TEST_DATA_DIR").map(std::ffi::OsString::from)
+                    })
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or(app_data_dir)
+            } else {
+                app_data_dir
+            };
             std::fs::create_dir_all(&app_data_dir)?;
             let db_path = db::resolve_db_path(&app_data_dir);
 
             let conn = db::init(&db_path)?;
+            let configured = app
+                .config()
+                .plugins
+                .0
+                .get("updater")
+                .and_then(|value| value.get("pubkey"))
+                .and_then(|value| value.as_str())
+                .is_some_and(|key| !key.is_empty());
+            let updates =
+                updater::Service::load(&conn, app.package_info().version.to_string(), configured)?;
+            app.manage(updater::activity::Activity::default());
+            app.manage(updates.clone());
+            tauri::async_runtime::spawn(updates.run(app.handle().clone()));
             let policy = resource_policy::ResourcePolicy::load(&conn)?;
             app.manage(policy.clone());
             db::run_retention_cleanup(
@@ -55,9 +81,20 @@ pub fn run() {
                 icon_sync,
             ));
 
+            #[cfg(feature = "updater-test")]
+            updater::test_driver::spawn(app.handle().clone());
+
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let Some(updates) = window.try_state::<updater::Service>() {
+                if matches!(event, tauri::WindowEvent::Focused(true)) {
+                    updates.wake();
+                }
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    updates.forget_window(window.label());
+                }
+            }
             if matches!(
                 event,
                 tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(_)
@@ -70,6 +107,13 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            updater::get_update_state,
+            updater::get_update_settings,
+            updater::check_for_updates,
+            updater::install_available_update,
+            updater::set_update_settings,
+            updater::set_update_draft,
+            updater::restart_after_update,
             commands::add_feed::add_feed,
             commands::article::load_article,
             commands::article::cancel_article_read,
