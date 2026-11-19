@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy, untrack } from 'svelte';
   import {
     applyOverlay,
     extractPlainText,
@@ -115,7 +116,9 @@
   function videoLink(markup: string | null): string | null {
     if (!markup) return null;
     const parsed = new DOMParser().parseFromString(markup, 'text/html');
-    const source = parsed.querySelector('iframe[src], video[src], video source[src], embed[src], object[data]');
+    const source = parsed.querySelector(
+      'iframe[src], video[src], video source[src], embed[src], object[data]',
+    );
     const rawUrl = source?.getAttribute('src') ?? source?.getAttribute('data');
     if (rawUrl) return safeUrl(rawUrl);
     const clipHandle = parsed.body.textContent?.match(/클립\s*\(@([A-Za-z0-9._-]+)\)/)?.[1];
@@ -206,7 +209,9 @@
       const tag = node.tagName;
       if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'MATH'].includes(tag)) return;
       if (tag === 'IFRAME' || tag === 'VIDEO' || tag === 'EMBED' || tag === 'OBJECT') {
-        const rawUrl = node.getAttribute('src') ?? node.getAttribute('data') ??
+        const rawUrl =
+          node.getAttribute('src') ??
+          node.getAttribute('data') ??
           (tag === 'VIDEO' ? node.querySelector('source[src]')?.getAttribute('src') : null);
         const href = rawUrl ? safeUrl(rawUrl) : null;
         if (href) {
@@ -254,7 +259,19 @@
         }
       }
 
-      parent.appendChild(clean);
+      if (tag === 'TABLE') {
+        // CSS alone can't add a wrapping element - a real wrapper div is
+        // what lets the table scroll horizontally while staying a normal
+        // `display: table` with real column widths, instead of overflow
+        // being bolted onto the table element itself
+        // (docs/UNIFIED_UX_MOTION_PLAN.md §7.2 R7).
+        const wrapper = output.createElement('div');
+        wrapper.className = 'table-wrap';
+        parent.appendChild(wrapper);
+        wrapper.appendChild(clean);
+      } else {
+        parent.appendChild(clean);
+      }
       node.childNodes.forEach((child) => copySafe(child, clean));
     }
 
@@ -276,7 +293,8 @@
   const preview = $derived(textPreview(content));
   const videoHref = $derived(videoLink(content));
   const videoLinkLabel = $derived(
-    content && /클립\s*\(@[A-Za-z0-9._-]+\)/.test(content) ? t('content.openVideoChannel')
+    content && /클립\s*\(@[A-Za-z0-9._-]+\)/.test(content)
+      ? t('content.openVideoChannel')
       : t('content.openVideo'),
   );
 
@@ -285,6 +303,8 @@
   let wrapperEl: HTMLDivElement | undefined = $state();
   let contentEl: HTMLDivElement | undefined = $state();
   let overlayGeneration = 0;
+  let contentGeneration = 0;
+  let truncationTimer: ReturnType<typeof setTimeout> | undefined;
   let memoMarkers = $state<Array<{ id: number; top: number }>>([]);
 
   function recomputeMemoMarkerPositions() {
@@ -316,6 +336,37 @@
       onOrphanedChange?.(result.orphanedIds);
       if (result.toPersist.length > 0) onReanchored?.(result.toPersist);
     });
+    return () => {
+      overlayGeneration++;
+    };
+  });
+
+  // A width-less <img> gets a fixed aspect-ratio box only until it
+  // resolves (loads or fails) - after that its real content decides the
+  // size, so a tall screenshot or a square diagram no longer gets cropped
+  // to 16:9 forever (docs/UNIFIED_UX_MOTION_PLAN.md §7.2 R6). Re-runs
+  // whenever the sanitized HTML changes, since that's a whole new set of
+  // <img> elements.
+  $effect(() => {
+    if (compact || !contentEl) return;
+    void html;
+    const images = contentEl.querySelectorAll<HTMLImageElement>('img:not([width])');
+    const cleanups: Array<() => void> = [];
+    images.forEach((img) => {
+      img.setAttribute('data-ph', '');
+      const clear = () => img.removeAttribute('data-ph');
+      if (img.complete && img.naturalWidth > 0) {
+        clear();
+        return;
+      }
+      img.addEventListener('load', clear, { once: true });
+      img.addEventListener('error', clear, { once: true });
+      cleanups.push(() => {
+        img.removeEventListener('load', clear);
+        img.removeEventListener('error', clear);
+      });
+    });
+    return () => cleanups.forEach((fn) => fn());
   });
 
   $effect(() => {
@@ -338,7 +389,41 @@
     rect: DOMRect;
     kind: AnnotationKind;
     annotation: Annotation | null;
+    /** The mark/marker that opened this, for focus restoration on close
+     * (docs/UNIFIED_UX_MOTION_PLAN.md §7.5 A3) - undefined for a brand-new
+     * highlight/memo, which has no prior trigger element to return to. */
+    returnFocusTo?: HTMLElement;
   } | null>(null);
+
+  function closePopover(restoreFocus = false) {
+    const focusTarget = popover?.returnFocusTo;
+    popover = null;
+    if (restoreFocus) focusTarget?.focus();
+  }
+
+  function releaseSelectionUi() {
+    const selection = window.getSelection();
+    if (selection?.anchorNode && contentEl?.contains(selection.anchorNode))
+      selection.removeAllRanges();
+    toolbarRect = null;
+    pendingSelection = null;
+    popover = null;
+    truncationNotice = null;
+    clearTimeout(truncationTimer);
+  }
+
+  $effect.pre(() => {
+    void html;
+    untrack(() => {
+      contentGeneration++;
+      releaseSelectionUi();
+    });
+  });
+  onDestroy(() => {
+    contentGeneration++;
+    overlayGeneration++;
+    releaseSelectionUi();
+  });
 
   function clearSelectionUi() {
     toolbarRect = null;
@@ -387,8 +472,11 @@
 
   async function handleHighlight(color: string) {
     if (!pendingSelection || !contentEl) return;
-    const { start, end, text } = pendingSelection;
+    const selected = pendingSelection;
+    const { start, end, text } = selected;
+    const generation = contentGeneration;
     const contentHash = await hashPlainText(extractPlainText(contentEl));
+    if (generation !== contentGeneration || pendingSelection !== selected) return;
     clearSelectionUi();
     onCreateAnnotation?.({
       kind: 'highlight',
@@ -414,7 +502,8 @@
     if (truncated && toolbarRect) {
       const rect = toolbarRect;
       truncationNotice = rect;
-      setTimeout(() => {
+      clearTimeout(truncationTimer);
+      truncationTimer = setTimeout(() => {
         if (truncationNotice === rect) truncationNotice = null;
       }, 2500);
     }
@@ -425,13 +514,16 @@
   async function handleMemoSave(note: string) {
     if (popover?.annotation) {
       onUpdateAnnotation?.({ ...popover.annotation, note });
-      popover = null;
+      closePopover(true);
       return;
     }
     if (!pendingSelection || !contentEl) return;
-    const { start, end, text } = pendingSelection;
+    const selected = pendingSelection;
+    const { start, end, text } = selected;
+    const generation = contentGeneration;
     const contentHash = await hashPlainText(extractPlainText(contentEl));
-    popover = null;
+    if (generation !== contentGeneration || pendingSelection !== selected) return;
+    closePopover(true);
     clearSelectionUi();
     onCreateAnnotation?.({
       kind: 'memo',
@@ -446,32 +538,58 @@
   function handleColorChange(color: string) {
     if (!popover?.annotation) return;
     onUpdateAnnotation?.({ ...popover.annotation, color });
-    popover = null;
+    closePopover(true);
   }
 
   function handlePopoverDelete() {
     if (!popover?.annotation) return;
     onDeleteAnnotation?.(popover.annotation.id);
+    // Not restoring focus here: the mark this came from is about to be
+    // removed from the DOM once the delete round-trips, so there would be
+    // nothing left to focus.
     popover = null;
+  }
+
+  function openPopoverForMark(markEl: HTMLElement) {
+    const id = Number(markEl.getAttribute('data-annotation-id'));
+    const found = annotations.find((candidate) => candidate.id === id);
+    if (!found) return;
+    popover = {
+      rect: markEl.getBoundingClientRect(),
+      kind: found.kind,
+      annotation: found,
+      returnFocusTo: markEl,
+    };
   }
 
   function handleContentClick(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
     const markEl = target?.closest<HTMLElement>('[data-annotation-id]');
+    if (markEl) openPopoverForMark(markEl);
+  }
+
+  // Enter/Space activates an existing mark now that applyOverlay() gives it
+  // tabindex/role="button" (docs/UNIFIED_UX_MOTION_PLAN.md §7.5 A2) -
+  // separate from the keyup handler below, which is about *making* a new
+  // selection, not opening one that already exists.
+  function handleContentKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const target = event.target as HTMLElement | null;
+    const markEl = target?.closest<HTMLElement>('[data-annotation-id]');
     if (!markEl) return;
-    const id = Number(markEl.getAttribute('data-annotation-id'));
-    const found = annotations.find((candidate) => candidate.id === id);
-    if (!found) return;
-    popover = { rect: markEl.getBoundingClientRect(), kind: found.kind, annotation: found };
+    event.preventDefault();
+    openPopoverForMark(markEl);
   }
 
   function handleMemoMarkerClick(id: number, event: MouseEvent) {
     const found = annotations.find((candidate) => candidate.id === id);
     if (!found) return;
+    const trigger = event.currentTarget as HTMLElement;
     popover = {
-      rect: (event.currentTarget as HTMLElement).getBoundingClientRect(),
+      rect: trigger.getBoundingClientRect(),
       kind: found.kind,
       annotation: found,
+      returnFocusTo: trigger,
     };
   }
 </script>
@@ -479,8 +597,16 @@
 {#if compact}
   <span class="content compact">{preview}</span>
   {#if videoHref}
-    <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-    <a class="video-link compact-video-link" href={videoHref} target="_blank" rel="noopener noreferrer" onclick={(event) => event.stopPropagation()}>{videoLinkLabel} <Icon name="external-link" size={12} /></a>
+    <!-- eslint-disable svelte/no-navigation-without-resolve -->
+    <a
+      class="video-link compact-video-link"
+      href={videoHref}
+      target="_blank"
+      rel="noopener noreferrer"
+      onclick={(event) => event.stopPropagation()}
+      >{videoLinkLabel} <Icon name="external-link" size={12} /></a
+    >
+    <!-- eslint-enable svelte/no-navigation-without-resolve -->
   {/if}
 {:else}
   <div class="annotated-content" bind:this={wrapperEl}>
@@ -490,6 +616,7 @@
       bind:this={contentEl}
       onmouseup={handleSelectionFinished}
       onkeyup={handleSelectionFinished}
+      onkeydown={handleContentKeydown}
       onclick={handleContentClick}
     >
       <!-- This HTML is rebuilt from an explicit element and URL allowlist. -->
@@ -503,7 +630,8 @@
           class="memo-marker"
           style:top="{marker.top}px"
           aria-label={t('annotation.openMemo')}
-          onclick={(event) => handleMemoMarkerClick(marker.id, event)}><Icon name="memo" size={14} /></button
+          onclick={(event) => handleMemoMarkerClick(marker.id, event)}
+          ><Icon name="memo" size={14} /></button
         >
       {/each}
     </div>
@@ -536,7 +664,7 @@
       onSaveNote={handleMemoSave}
       onColorChange={handleColorChange}
       onDelete={handlePopoverDelete}
-      onClose={() => (popover = null)}
+      onClose={() => closePopover(true)}
     />
   {/if}
 {/if}
@@ -561,8 +689,17 @@
     -webkit-line-clamp: 2;
   }
 
-  .video-link { display: inline-block; margin-block: 6px; color: var(--color-accent); font-size: var(--text-small); font-weight: var(--weight-medium); text-decoration: none; }
-  .video-link:hover { text-decoration: underline; }
+  .video-link {
+    display: inline-block;
+    margin-block: 6px;
+    color: var(--color-accent);
+    font-size: var(--text-small);
+    font-weight: var(--weight-medium);
+    text-decoration: none;
+  }
+  .video-link:hover {
+    text-decoration: underline;
+  }
 
   .annotated-content {
     position: relative;
@@ -616,6 +753,11 @@
   .content :global(mark.aequo-hl) {
     border-radius: 2px;
     padding: 0 1px;
+    /* Without this the UA default (often a dark MarkText) can leave
+       highlighted text barely readable against --color-bg in dark mode -
+       PostsFeed's search-match <mark> already sets this the same way
+       (docs/UNIFIED_UX_MOTION_PLAN.md §7.4 D1). */
+    color: inherit;
     cursor: pointer;
   }
   .content :global(mark.aequo-hl-yellow) {
@@ -636,7 +778,10 @@
 
   .content :global(.aequo-memo-mark) {
     cursor: pointer;
-    border-bottom: 1.5px dashed var(--color-text-tertiary);
+    /* --color-text-tertiary read too close to the body text color to find
+       reliably (docs/UNIFIED_UX_MOTION_PLAN.md §7.4 D6) - the accent color
+       already distinguishes itself from body text in both themes. */
+    border-bottom: 2px dashed var(--color-accent);
   }
 
   .content :global(p) {
@@ -655,6 +800,40 @@
     margin: 1.25em 0 0.5em;
     line-height: 1.3;
   }
+  /* Sized below --text-display (the article's own title) so a feed's own
+     heading markup can never outrank it (docs/UNIFIED_UX_MOTION_PLAN.md §7.2 R3). */
+  .content :global(h1) {
+    font-size: var(--text-reading-h1);
+    font-weight: var(--weight-bold);
+  }
+  .content :global(h2) {
+    font-size: var(--text-reading-h2);
+    font-weight: var(--weight-bold);
+  }
+  .content :global(h3) {
+    font-size: var(--text-reading-h3);
+    font-weight: var(--weight-medium);
+  }
+  .content :global(h4) {
+    font-size: var(--text-reading);
+    font-weight: var(--weight-medium);
+  }
+
+  .content :global(ul),
+  .content :global(ol) {
+    margin: 0 0 1em;
+    padding-left: 1.4em;
+  }
+  .content :global(li) {
+    margin-bottom: 0.35em;
+  }
+  .content :global(li:last-child) {
+    margin-bottom: 0;
+  }
+  .content :global(li ul),
+  .content :global(li ol) {
+    margin-bottom: 0;
+  }
 
   .content :global(img) {
     display: block;
@@ -662,15 +841,21 @@
     height: auto;
     margin: 14px auto;
     border-radius: var(--radius-md);
+    object-fit: contain;
   }
 
   /* Feeds that omit width/height (common for RSS) give the browser nothing
      to size the box with before the image loads - reserve a sensible
-     placeholder area so the surrounding text doesn't jump once it does. */
-  .content :global(img:not([width])) {
+     placeholder area so the surrounding text doesn't jump once it does.
+     `[data-ph]` (set/cleared in the component script) scopes this to the
+     loading gap only, instead of forcing every such image into 16:9
+     forever regardless of its real shape (docs/UNIFIED_UX_MOTION_PLAN.md §7.2 R6). */
+  .content :global(img[data-ph]) {
     aspect-ratio: 16 / 9;
-    background: var(--color-bg-secondary);
-    object-fit: cover;
+    /* A light neutral plate (even in dark mode) previews closer to most
+       web images' own light backgrounds than the app's own dark surface
+       would (docs/UNIFIED_UX_MOTION_PLAN.md §7.4 D5). */
+    background: var(--color-image-plate);
   }
 
   .content :global(pre) {
@@ -682,12 +867,17 @@
     border-radius: var(--radius-lg);
     background: var(--color-bg-secondary);
     color: var(--color-text);
-    font:
-      0.88em/1.65 ui-monospace,
+    /* `font:` shorthand hid this from scripts/check-type-scale.sh - split
+       so font-size is checkable like everywhere else
+       (docs/UNIFIED_UX_MOTION_PLAN.md §7.2 R8). */
+    font-family:
+      ui-monospace,
       SFMono-Regular,
       Menlo,
       Consolas,
       monospace;
+    font-size: var(--text-title);
+    line-height: 1.65;
     white-space: pre;
     tab-size: 2;
   }
@@ -696,12 +886,13 @@
     padding: 0.12em 0.35em;
     border-radius: var(--radius-xs);
     background: var(--color-bg-secondary);
-    font:
-      0.9em ui-monospace,
+    font-family:
+      ui-monospace,
       SFMono-Regular,
       Menlo,
       Consolas,
       monospace;
+    font-size: var(--text-title);
     white-space: normal;
   }
 
@@ -738,12 +929,21 @@
 
   .content :global(a) {
     color: var(--color-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
     overflow-wrap: anywhere;
   }
-  .content :global(table) {
-    display: block;
-    max-width: 100%;
+  /* The actual scroll container - the table itself stays a real
+     `display: table` so its columns get real widths instead of the
+     browser's anonymous-table fallback for a block-level <table>
+     (docs/UNIFIED_UX_MOTION_PLAN.md §7.2 R7). */
+  .content :global(.table-wrap) {
+    margin: 14px 0;
     overflow-x: auto;
+  }
+  .content :global(table) {
+    display: table;
+    width: 100%;
     border-collapse: collapse;
   }
   .content :global(th),
@@ -752,5 +952,8 @@
     border: 1px solid var(--color-border);
     text-align: left;
   }
-
+  .content :global(th) {
+    background: var(--color-bg-secondary);
+    font-weight: var(--weight-medium);
+  }
 </style>

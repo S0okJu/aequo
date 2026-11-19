@@ -50,4 +50,34 @@ describe('AddFeedForm (dialog layout)', () => {
     await vi.waitFor(() => expect(onAdded).toHaveBeenCalledWith(42));
     expect(updateFeedOrganization).not.toHaveBeenCalled();
   });
+
+  it('shows an invalid URL as a field message next to the input, not a card, and never calls addFeed', async () => {
+    render(AddFeedForm, { props: { folders, onAdded: vi.fn(), onCancel: vi.fn() } });
+    const input = screen.getByLabelText('Feed URL');
+    await fireEvent.input(input, { target: { value: 'not a url' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Add feed' }));
+
+    const message = await screen.findByRole('alert');
+    expect(message.textContent).toContain("doesn't look like a valid URL");
+    expect(message.classList.contains('field-error')).toBe(true);
+    expect(document.activeElement).toBe(input);
+    expect(addFeed).not.toHaveBeenCalled();
+  });
+
+  it('offers a retry card for a failed add, which resubmits the same URL', async () => {
+    addFeed.mockRejectedValueOnce(new Error('request timed out'));
+    render(AddFeedForm, { props: { folders, onAdded: vi.fn(), onCancel: vi.fn() } });
+    await fireEvent.input(screen.getByLabelText('Feed URL'), {
+      target: { value: 'https://blog.example/feed.xml' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Add feed' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('timed out');
+
+    addFeed.mockResolvedValueOnce(99);
+    await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => expect(addFeed).toHaveBeenCalledTimes(2));
+    expect(addFeed).toHaveBeenLastCalledWith('https://blog.example/feed.xml');
+  });
 });

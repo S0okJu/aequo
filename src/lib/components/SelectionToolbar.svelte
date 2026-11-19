@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Icon from '$lib/icons/Icon.svelte';
+  import IconButton from './IconButton.svelte';
   import { t } from '$lib/i18n/index.svelte';
 
   interface Props {
@@ -12,7 +12,9 @@
   let { rect, onHighlight, onMemo, onAskAi }: Props = $props();
 
   const COLORS = ['yellow', 'green', 'blue', 'pink', 'purple'] as const;
-  const TOOLBAR_WIDTH = 223;
+  // +20px over the old 22px swatches: same 26px swatch size as
+  // AnnotationPopover.svelte now (docs/UNIFIED_UX_MOTION_PLAN.md §7.5 D3).
+  const TOOLBAR_WIDTH = 243;
   const TOOLBAR_HEIGHT = 42;
   const MARGIN = 8;
 
@@ -55,20 +57,8 @@
     ></button>
   {/each}
   <span class="divider" aria-hidden="true"></span>
-  <button
-    type="button"
-    class="action"
-    aria-label={t('annotation.addMemo')}
-    title={t('annotation.addMemo')}
-    onclick={onMemo}><Icon name="edit" size={14} /></button
-  >
-  <button
-    type="button"
-    class="action"
-    aria-label={t('annotation.askAi')}
-    title={t('annotation.askAi')}
-    onclick={onAskAi}><Icon name="ask-ai" size={14} /></button
-  >
+  <IconButton icon="edit" label={t('annotation.addMemo')} onclick={onMemo} />
+  <IconButton icon="ask-ai" label={t('annotation.askAi')} onclick={onAskAi} />
 </div>
 
 <style>
@@ -77,8 +67,10 @@
     z-index: 50;
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px;
+    /* Smaller than the general --space-2 rhythm on purpose - this is the
+       app's most compact floating control, a one-line selection popup. */
+    gap: var(--space-1);
+    padding: var(--space-1);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     background: var(--color-bg);
@@ -86,38 +78,21 @@
   }
 
   .swatch {
-    width: 22px;
-    height: 22px;
+    width: 26px;
+    height: 26px;
     border: 1px solid var(--color-border);
     border-radius: 50%;
     cursor: pointer;
+    transition: border-color var(--transition);
   }
 
   .swatch:hover {
-    transform: scale(1.12);
+    border-color: var(--color-accent);
   }
 
   .divider {
     width: 1px;
     height: 20px;
     background: var(--color-border);
-  }
-
-  .action {
-    display: grid;
-    width: 28px;
-    height: 28px;
-    place-items: center;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-text-secondary);
-    font-size: var(--text-body);
-    cursor: pointer;
-  }
-
-  .action:hover {
-    background: var(--color-hover-bg);
-    color: var(--color-accent);
   }
 </style>

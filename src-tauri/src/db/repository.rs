@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, Result, params, params_from_iter};
 
 use super::models::{
     AiSession, Annotation, ArticleCache, CleanupPreview, CleanupResult, Feed, FeedFolder, FeedMeta,
-    Item, ItemCursor, ItemFilter, NewItem, RetentionSettings,
+    Item, ItemCursor, ItemFilter, ItemSummary, NewItem, RetentionSettings,
 };
 
 fn row_to_article_cache(row: &rusqlite::Row) -> rusqlite::Result<ArticleCache> {
@@ -24,8 +24,10 @@ fn row_to_article_cache(row: &rusqlite::Row) -> rusqlite::Result<ArticleCache> {
     })
 }
 
+#[cfg(test)]
 const ARTICLE_CACHE_COLUMNS: &str = "item_id, original_url, final_url, title, content_html, text_content, etag, last_modified, fetched_at, error";
 
+#[cfg(test)]
 pub fn get_article_cache(conn: &Connection, item_id: i64) -> Result<Option<ArticleCache>> {
     conn.query_row(
         &format!("SELECT {ARTICLE_CACHE_COLUMNS} FROM article_cache WHERE item_id = ?1"),
@@ -33,6 +35,35 @@ pub fn get_article_cache(conn: &Connection, item_id: i64) -> Result<Option<Artic
         row_to_article_cache,
     )
     .optional()
+}
+
+/// Reader projection: plaintext is indexed on disk, never rendered by the UI.
+/// Reject oversized legacy HTML before constructing Rust/IPC strings.
+pub fn get_reader_article_cache(
+    conn: &Connection,
+    item_id: i64,
+    maximum_bytes: usize,
+) -> Result<Option<(ArticleCache, bool)>> {
+    conn.query_row(
+        "SELECT item_id, original_url, final_url, title,
+         CASE WHEN length(CAST(content_html AS BLOB)) <= ?2 THEN content_html END,
+         NULL,
+         CASE WHEN COALESCE(length(CAST(content_html AS BLOB)), 0) <= ?2 THEN etag END,
+         CASE WHEN COALESCE(length(CAST(content_html AS BLOB)), 0) <= ?2 THEN last_modified END,
+         fetched_at,
+         CASE WHEN length(CAST(content_html AS BLOB)) > ?2 THEN 'Saved full text exceeds the 5 MiB display limit. The original remains on disk.' ELSE error END,
+         COALESCE(length(CAST(content_html AS BLOB)), 0) > ?2
+         FROM article_cache WHERE item_id=?1",
+        params![item_id, maximum_bytes as i64], |row| Ok((row_to_article_cache(row)?, row.get(10)?)),
+    ).optional()
+}
+
+pub fn touch_article_cache(conn: &Connection, item_id: i64, fetched_at: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE article_cache SET fetched_at=?2, error=NULL WHERE item_id=?1",
+        params![item_id, fetched_at],
+    )?;
+    Ok(())
 }
 
 pub fn save_article_cache(conn: &Connection, article: &ArticleCache) -> Result<()> {
@@ -79,10 +110,6 @@ pub fn delete_feed(conn: &Connection, feed_id: i64) -> Result<bool> {
     // keeps unsubscribe correct for databases opened by older builds where
     // foreign-key enforcement may not have been enabled on every connection.
     tx.execute(
-        "DELETE FROM ai_sessions WHERE item_id IN (SELECT id FROM items WHERE feed_id = ?1)",
-        params![feed_id],
-    )?;
-    tx.execute(
         "DELETE FROM article_cache WHERE item_id IN (SELECT id FROM items WHERE feed_id = ?1)",
         params![feed_id],
     )?;
@@ -90,6 +117,14 @@ pub fn delete_feed(conn: &Connection, feed_id: i64) -> Result<bool> {
     tx.execute(
         "DELETE FROM feed_icons WHERE feed_id = ?1",
         params![feed_id],
+    )?;
+    tx.execute(
+        "DELETE FROM feed_initial_exclusions WHERE feed_id=?1",
+        [feed_id],
+    )?;
+    tx.execute(
+        "DELETE FROM feed_collection_state WHERE feed_id=?1",
+        [feed_id],
     )?;
     let deleted = tx.execute("DELETE FROM feeds WHERE id = ?1", params![feed_id])? > 0;
     tx.commit()?;
@@ -113,10 +148,12 @@ fn row_to_feed(row: &rusqlite::Row) -> rusqlite::Result<Feed> {
         hidden_from_all: row.get::<_, i64>(12)? != 0,
         language: row.get(13)?,
         custom_title: row.get(14)?,
+        sort_order: row.get(15)?,
+        pinned: row.get::<_, i64>(16)? != 0,
     })
 }
 
-const FEED_COLUMNS: &str = "id, url, title, format, etag, last_modified, interval_secs, next_fetch_at, last_error, consecutive_failures, created_at, folder_id, hidden_from_all, language, custom_title";
+const FEED_COLUMNS: &str = "id, url, title, format, etag, last_modified, interval_secs, next_fetch_at, last_error, consecutive_failures, created_at, folder_id, hidden_from_all, language, custom_title, sort_order, pinned";
 
 fn row_to_folder(row: &rusqlite::Row) -> rusqlite::Result<FeedFolder> {
     Ok(FeedFolder {
@@ -196,10 +233,16 @@ pub fn save_feed_icon(
     Ok(())
 }
 
-/// Every stored icon as (feed id, mime, bytes); failed lookups excluded.
-pub fn list_feed_icons(conn: &Connection) -> Result<Vec<(i64, String, Vec<u8>)>> {
-    let mut stmt = conn.prepare("SELECT feed_id, mime, data FROM feed_icons WHERE mime != ''")?;
-    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+/// Requested icons only; legacy oversized blobs also stay out of IPC.
+pub fn list_feed_icons(conn: &Connection, feed_ids: &[i64]) -> Result<Vec<(i64, String, Vec<u8>)>> {
+    if feed_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = vec!["?"; feed_ids.len()].join(",");
+    let mut stmt = conn.prepare(&format!("SELECT feed_id, mime, data FROM feed_icons WHERE mime != '' AND length(mime) <= 128 AND length(data) <= 65536 AND feed_id IN ({placeholders})"))?;
+    let rows = stmt.query_map(params_from_iter(feed_ids.iter()), |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })?;
     rows.collect()
 }
 
@@ -216,6 +259,38 @@ pub fn update_feed_organization(
     Ok(conn.execute(
         "UPDATE feeds SET folder_id=?1, hidden_from_all=?2 WHERE id=?3",
         params![folder_id, hidden_from_all, feed_id],
+    )? > 0)
+}
+
+/// Rewrites every feed's position within one folder (or the unfiled group,
+/// `folder_id = None`) to match `ordered_feed_ids`, 0-indexed (§J). Feeds
+/// belonging to a different folder are ignored, so a stale id from a feed
+/// that moved elsewhere between the drag starting and finishing is harmless.
+pub fn reorder_feeds_in_folder(
+    conn: &Connection,
+    folder_id: Option<i64>,
+    ordered_feed_ids: &[i64],
+) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for (position, feed_id) in ordered_feed_ids.iter().enumerate() {
+        match folder_id {
+            Some(folder_id) => tx.execute(
+                "UPDATE feeds SET sort_order=?1 WHERE id=?2 AND folder_id=?3",
+                params![position as i64, feed_id, folder_id],
+            )?,
+            None => tx.execute(
+                "UPDATE feeds SET sort_order=?1 WHERE id=?2 AND folder_id IS NULL",
+                params![position as i64, feed_id],
+            )?,
+        };
+    }
+    tx.commit()
+}
+
+pub fn set_feed_pinned(conn: &Connection, feed_id: i64, pinned: bool) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE feeds SET pinned=?1 WHERE id=?2",
+        params![pinned, feed_id],
     )? > 0)
 }
 
@@ -242,7 +317,9 @@ pub fn get_feed_by_id(conn: &Connection, feed_id: i64) -> Result<Option<Feed>> {
 }
 
 pub fn list_feeds(conn: &Connection) -> Result<Vec<Feed>> {
-    let mut stmt = conn.prepare(&format!("SELECT {FEED_COLUMNS} FROM feeds ORDER BY id"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {FEED_COLUMNS} FROM feeds ORDER BY folder_id, sort_order, id"
+    ))?;
     let rows = stmt.query_map([], row_to_feed)?;
     rows.collect()
 }
@@ -357,16 +434,36 @@ pub fn update_feed_failed(
 /// Inserts new items for `feed_id`, skipping ones already present
 /// (matched by the `UNIQUE(feed_id, guid_hash)` constraint). Returns the
 /// number of rows actually inserted.
+#[cfg(test)]
 pub fn upsert_items(conn: &Connection, feed_id: i64, items: &[NewItem]) -> Result<usize> {
     let tx = conn.unchecked_transaction()?;
+    let inserted = upsert_items_in_transaction(&tx, feed_id, items)?;
+    tx.commit()?;
+    Ok(inserted)
+}
+
+pub(crate) fn upsert_items_in_transaction(
+    conn: &Connection,
+    feed_id: i64,
+    items: &[NewItem],
+) -> Result<usize> {
+    let excluded = super::collection::exclusions(conn, feed_id)?;
+    let website: bool = conn.query_row(
+        "SELECT COALESCE(format='website',0) FROM feeds WHERE id=?1",
+        [feed_id],
+        |row| row.get(0),
+    )?;
     let mut inserted = 0usize;
     {
-        let mut stmt = tx.prepare(
+        let mut stmt = conn.prepare(
             "INSERT OR IGNORE INTO items
-                (feed_id, guid_hash, title, link, summary, full_content, published_at, fetched_at, is_read)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0)",
+                (feed_id, guid_hash, title, link, summary, full_content, published_at, fetched_at, published_at_kind, is_read)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)",
         )?;
         for item in items {
+            if super::collection::is_excluded(item, website, &excluded) {
+                continue;
+            }
             inserted += stmt.execute(params![
                 feed_id,
                 item.guid_hash,
@@ -376,14 +473,14 @@ pub fn upsert_items(conn: &Connection, feed_id: i64, items: &[NewItem]) -> Resul
                 item.full_content,
                 item.published_at,
                 item.fetched_at,
+                item.published_at_kind,
             ])?;
-            tx.execute(
+            conn.execute(
                 "UPDATE items SET full_content = COALESCE(full_content, ?1) WHERE feed_id = ?2 AND guid_hash = ?3",
                 params![item.full_content, feed_id, item.guid_hash],
             )?;
         }
     }
-    tx.commit()?;
     Ok(inserted)
 }
 
@@ -414,12 +511,41 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<Item> {
         is_read: row.get::<_, i64>(9)? != 0,
         read_at: row.get(10)?,
         is_saved: row.get::<_, i64>(11)? != 0,
+        published_at_kind: row.get(12)?,
     })
 }
 
-const ITEM_COLUMNS: &str = "id, feed_id, guid_hash, title, link, summary, full_content, published_at, fetched_at, is_read, read_at, is_saved";
-const ITEM_LIST_COLUMNS: &str = "id, feed_id, guid_hash, title, link, summary, NULL, published_at, fetched_at, is_read, read_at, is_saved";
+#[cfg(test)]
+const ITEM_COLUMNS: &str = "id, feed_id, guid_hash, title, link, summary, full_content, published_at, fetched_at, is_read, read_at, is_saved, published_at_kind";
+const ITEM_LIST_COLUMNS: &str = "id, feed_id, guid_hash, title, link, substr(strip_html(summary), 1, 500), published_at, fetched_at, is_read, read_at, is_saved, published_at_kind";
 
+fn row_to_item_summary(row: &rusqlite::Row) -> Result<ItemSummary> {
+    Ok(ItemSummary {
+        id: row.get(0)?,
+        feed_id: row.get(1)?,
+        guid_hash: row.get(2)?,
+        title: row.get(3)?,
+        link: row.get(4)?,
+        preview: row.get(5)?,
+        published_at: row.get(6)?,
+        fetched_at: row.get(7)?,
+        is_read: row.get(8)?,
+        read_at: row.get(9)?,
+        is_saved: row.get(10)?,
+        published_at_kind: row.get(11)?,
+    })
+}
+
+pub fn get_item_summary_by_id(conn: &Connection, item_id: i64) -> Result<Option<ItemSummary>> {
+    conn.query_row(
+        &format!("SELECT {ITEM_LIST_COLUMNS} FROM items WHERE id=?1"),
+        params![item_id],
+        row_to_item_summary,
+    )
+    .optional()
+}
+
+#[cfg(test)]
 pub fn get_item_by_id(conn: &Connection, item_id: i64) -> Result<Option<Item>> {
     conn.query_row(
         &format!("SELECT {ITEM_COLUMNS} FROM items WHERE id = ?1"),
@@ -429,51 +555,65 @@ pub fn get_item_by_id(conn: &Connection, item_id: i64) -> Result<Option<Item>> {
     .optional()
 }
 
+/// Read one source body and a bounded RSS fallback without returning an
+/// oversized historical HTML value to Rust. The original row is unchanged.
+pub fn get_reader_item(
+    conn: &Connection,
+    item_id: i64,
+    maximum_bytes: usize,
+) -> Result<Option<(Item, bool)>> {
+    conn.query_row(
+        "SELECT id, feed_id, guid_hash, title, link,
+         CASE WHEN (full_content IS NULL OR length(CAST(full_content AS BLOB)) > ?2) AND length(CAST(summary AS BLOB)) <= ?2 THEN summary END,
+         CASE WHEN length(CAST(full_content AS BLOB)) <= ?2 THEN full_content END,
+         published_at, fetched_at, is_read, read_at, is_saved, published_at_kind,
+         CASE WHEN full_content IS NOT NULL THEN length(CAST(full_content AS BLOB)) > ?2 ELSE COALESCE(length(CAST(summary AS BLOB)), 0) > ?2 END
+         FROM items WHERE id=?1",
+        params![item_id, maximum_bytes as i64], |row| Ok((row_to_item(row)?, row.get(13)?)),
+    ).optional()
+}
+
 fn row_to_ai_session(row: &rusqlite::Row) -> rusqlite::Result<AiSession> {
     Ok(AiSession {
         id: row.get(0)?,
-        item_id: row.get(1)?,
-        provider: row.get(2)?,
-        provider_session_id: row.get(3)?,
-        title: row.get(4)?,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
+        provider: row.get(1)?,
+        provider_session_id: row.get(2)?,
+        title: row.get(3)?,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+        scope_label: row.get(6)?,
+        context_items: Vec::new(),
     })
 }
 
+// The legacy item_id column is intentionally no longer read.
 const AI_SESSION_COLUMNS: &str =
-    "id, item_id, provider, provider_session_id, title, created_at, updated_at";
+    "id, provider, provider_session_id, title, created_at, updated_at, scope_label";
 
 pub fn get_ai_session(conn: &Connection, session_id: i64) -> Result<Option<AiSession>> {
-    conn.query_row(
-        &format!("SELECT {AI_SESSION_COLUMNS} FROM ai_sessions WHERE id = ?1"),
-        params![session_id],
-        row_to_ai_session,
-    )
-    .optional()
+    let mut session = conn
+        .query_row(
+            &format!("SELECT {AI_SESSION_COLUMNS} FROM ai_sessions WHERE id = ?1"),
+            params![session_id],
+            row_to_ai_session,
+        )
+        .optional()?;
+    if let Some(session) = &mut session {
+        session.context_items = super::ai_context::items(conn, session.id)?;
+    }
+    Ok(session)
 }
 
 pub fn list_ai_sessions(conn: &Connection, item_id: i64, provider: &str) -> Result<Vec<AiSession>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT {AI_SESSION_COLUMNS} FROM ai_sessions WHERE item_id = ?1 AND provider = ?2 ORDER BY updated_at DESC, id DESC"
+        "SELECT {AI_SESSION_COLUMNS} FROM ai_sessions WHERE id IN (SELECT session_id FROM ai_session_items WHERE item_id = ?1) AND provider = ?2 ORDER BY updated_at DESC, id DESC"
     ))?;
     let rows = stmt.query_map(params![item_id, provider], row_to_ai_session)?;
-    rows.collect()
-}
-
-pub fn create_ai_session(
-    conn: &Connection,
-    item_id: i64,
-    provider: &str,
-    provider_session_id: Option<&str>,
-    title: &str,
-    now: i64,
-) -> Result<i64> {
-    conn.execute(
-        "INSERT INTO ai_sessions (item_id, provider, provider_session_id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-        params![item_id, provider, provider_session_id, title, now],
-    )?;
-    Ok(conn.last_insert_rowid())
+    let mut sessions = rows.collect::<Result<Vec<_>>>()?;
+    for session in &mut sessions {
+        session.context_items = super::ai_context::items(conn, session.id)?;
+    }
+    Ok(sessions)
 }
 
 pub fn update_ai_session_provider_id(
@@ -497,7 +637,7 @@ pub fn delete_ai_session(conn: &Connection, session_id: i64) -> Result<bool> {
 /// `ItemFilter`. Shared by listing and bulk updates so both always cover
 /// the same rows.
 fn filter_conditions(filter: &ItemFilter) -> (Vec<&'static str>, Vec<Value>) {
-    let mut conditions = Vec::new();
+    let mut conditions = vec!["is_listing_noise = 0"];
     let mut values = Vec::new();
 
     if filter.unread_only {
@@ -517,7 +657,12 @@ fn filter_conditions(filter: &ItemFilter) -> (Vec<&'static str>, Vec<Value>) {
         // from "All" - a feed being decluttered from the merged
         // timeline shouldn't also hide items the user explicitly
         // starred from it.
-        conditions.push("feed_id IN (SELECT id FROM feeds WHERE hidden_from_all = 0)");
+        // Drive merged timelines from the chronological item index. An IN
+        // subquery can instead make SQLite scan each feed's GUID index and
+        // sort the entire matching history again for every 50-row page.
+        conditions.push(
+            "EXISTS (SELECT 1 FROM feeds WHERE feeds.id = items.feed_id AND hidden_from_all = 0)",
+        );
     }
     if let Some(from) = filter.published_from {
         conditions.push("published_at >= ?");
@@ -548,6 +693,18 @@ fn where_clause(conditions: &[&str]) -> String {
     }
 }
 
+/// Header counts must cover the whole filter, not just cached list pages.
+pub fn count_unread_items(conn: &Connection, filter: &ItemFilter) -> Result<i64> {
+    let mut filter = filter.clone();
+    filter.unread_only = true;
+    let (conditions, values) = filter_conditions(&filter);
+    conn.query_row(
+        &format!("SELECT COUNT(*) FROM items {}", where_clause(&conditions)),
+        params_from_iter(values),
+        |row| row.get(0),
+    )
+}
+
 /// Lists items for the merged timeline, newest first (§6.3), narrowed by
 /// `filter` (one feed, one folder, starred, unread, a day range). An empty
 /// filter is the default "All" view across every non-hidden feed.
@@ -556,7 +713,27 @@ pub fn list_items(
     filter: &ItemFilter,
     limit: i64,
     cursor: Option<ItemCursor>,
-) -> Result<Vec<Item>> {
+) -> Result<Vec<ItemSummary>> {
+    query_items(conn, filter, limit, cursor, false)
+}
+
+/// The nearest newer page, returned in the same newest-first view order.
+pub fn list_newer_items(
+    conn: &Connection,
+    filter: &ItemFilter,
+    limit: i64,
+    cursor: ItemCursor,
+) -> Result<Vec<ItemSummary>> {
+    query_items(conn, filter, limit, Some(cursor), true)
+}
+
+fn query_items(
+    conn: &Connection,
+    filter: &ItemFilter,
+    limit: i64,
+    cursor: Option<ItemCursor>,
+    newer: bool,
+) -> Result<Vec<ItemSummary>> {
     let (mut conditions, mut values) = filter_conditions(filter);
 
     // Keyset pagination on (published_at, id) rather than OFFSET: an
@@ -565,20 +742,32 @@ pub fn list_items(
     // "Strictly older than the last row we handed out" stays correct no
     // matter how many rows are inserted between pages.
     if let Some(cursor) = cursor {
-        conditions.push("(published_at < ? OR (published_at = ? AND id < ?))");
-        values.push(Value::Integer(cursor.published_at));
+        conditions.push(if newer {
+            "(published_at, id) > (?, ?)"
+        } else {
+            "(published_at, id) < (?, ?)"
+        });
         values.push(Value::Integer(cursor.published_at));
         values.push(Value::Integer(cursor.id));
     }
     values.push(Value::Integer(limit));
 
+    let order = if newer {
+        "published_at ASC, id ASC"
+    } else {
+        "published_at DESC, id DESC"
+    };
     let sql = format!(
-        "SELECT {ITEM_LIST_COLUMNS} FROM items {} ORDER BY published_at DESC, id DESC LIMIT ?",
+        "SELECT {ITEM_LIST_COLUMNS} FROM items {} ORDER BY {order} LIMIT ?",
         where_clause(&conditions)
     );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params_from_iter(values), row_to_item)?;
-    rows.collect()
+    let rows = stmt.query_map(params_from_iter(values), row_to_item_summary)?;
+    let mut page = rows.collect::<Result<Vec<_>>>()?;
+    if newer {
+        page.reverse();
+    }
+    Ok(page)
 }
 
 pub fn mark_read(conn: &Connection, item_id: i64, now: i64) -> Result<()> {
@@ -720,7 +909,7 @@ pub fn run_retention_cleanup(conn: &Connection, now: i64) -> Result<CleanupResul
 
 pub fn count_unread(conn: &Connection, feed_id: i64) -> Result<i64> {
     conn.query_row(
-        "SELECT COUNT(*) FROM items WHERE feed_id = ?1 AND is_read = 0",
+        "SELECT COUNT(*) FROM items WHERE feed_id = ?1 AND is_read = 0 AND is_listing_noise = 0",
         params![feed_id],
         |row| row.get(0),
     )
@@ -863,8 +1052,165 @@ mod tests {
     use super::*;
     use crate::db::init_in_memory;
 
+    #[test]
+    fn newer_pages_return_nearest_rows_in_view_order_for_every_filter_with_timestamp_ties() {
+        let conn = init_in_memory().unwrap();
+        let shown = insert_feed(&conn, "https://shown.invalid/rss", None, None, 0).unwrap();
+        let hidden = insert_feed(&conn, "https://hidden.invalid/rss", None, None, 0).unwrap();
+        let folder = create_feed_folder(&conn, "Folder", 0).unwrap();
+        update_feed_organization(&conn, shown, Some(folder), false).unwrap();
+        update_feed_organization(&conn, hidden, None, true).unwrap();
+        for feed in [shown, hidden] {
+            let rows: Vec<_> = (0..135)
+                .map(|index| NewItem {
+                    published_at: 1_700_000_000 + index / 60,
+                    ..sample_item(&format!("{feed}-{index}"))
+                })
+                .collect();
+            upsert_items(&conn, feed, &rows).unwrap();
+        }
+        conn.execute_batch("UPDATE items SET is_saved=(id%2=0), is_read=(id%3=0)")
+            .unwrap();
+        for filter in [
+            ItemFilter::default(),
+            ItemFilter {
+                feed_id: Some(hidden),
+                ..Default::default()
+            },
+            ItemFilter {
+                folder_id: Some(folder),
+                ..Default::default()
+            },
+            ItemFilter {
+                saved_only: true,
+                ..Default::default()
+            },
+            ItemFilter {
+                unread_only: true,
+                ..Default::default()
+            },
+            ItemFilter {
+                published_from: Some(1_700_000_001),
+                ..Default::default()
+            },
+            ItemFilter {
+                query: Some("Title".into()),
+                ..Default::default()
+            },
+        ] {
+            let expected = list_items(&conn, &filter, 1000, None).unwrap();
+            assert!(expected.len() > 51);
+            let cursor = ItemCursor {
+                published_at: expected[51].published_at,
+                id: expected[51].id,
+            };
+            let newer = list_newer_items(&conn, &filter, 17, cursor).unwrap();
+            assert_eq!(newer, expected[34..51]);
+            let cursor = ItemCursor {
+                published_at: newer[0].published_at,
+                id: newer[0].id,
+            };
+            assert_eq!(
+                list_newer_items(&conn, &filter, 17, cursor).unwrap(),
+                expected[17..34]
+            );
+        }
+    }
+
+    #[test]
+    fn icon_projection_only_returns_requested_bounded_blobs() {
+        let conn = init_in_memory().unwrap();
+        let a = insert_feed(&conn, "https://a.invalid/rss", None, None, 0).unwrap();
+        let b = insert_feed(&conn, "https://b.invalid/rss", None, None, 0).unwrap();
+        save_feed_icon(&conn, a, "image/png", b"small", None, 0).unwrap();
+        save_feed_icon(&conn, b, "image/png", &vec![0; 65537], None, 0).unwrap();
+        assert_eq!(list_feed_icons(&conn, &[a]).unwrap().len(), 1);
+        assert!(list_feed_icons(&conn, &[b]).unwrap().is_empty());
+        assert!(list_feed_icons(&conn, &[]).unwrap().is_empty());
+        let stored: i64 = conn
+            .query_row(
+                "SELECT length(data) FROM feed_icons WHERE feed_id=?1",
+                [b],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stored, 65537,
+            "projection limits must not delete stored icons"
+        );
+    }
+
+    #[test]
+    fn unread_scope_count_is_independent_of_page_size_and_respects_saved_and_date_filters() {
+        let conn = init_in_memory().unwrap();
+        let feed = insert_feed(&conn, "https://count.invalid/rss", None, None, 0).unwrap();
+        let rows: Vec<_> = (0..240)
+            .map(|index| NewItem {
+                published_at: 100 + index,
+                ..sample_item(&format!("count-{index}"))
+            })
+            .collect();
+        upsert_items(&conn, feed, &rows).unwrap();
+        assert_eq!(
+            list_items(&conn, &ItemFilter::default(), 50, None)
+                .unwrap()
+                .len(),
+            50
+        );
+        assert_eq!(
+            count_unread_items(&conn, &ItemFilter::default()).unwrap(),
+            240
+        );
+        conn.execute_batch("UPDATE items SET is_saved=(id%2=0), is_read=(id%3=0)")
+            .unwrap();
+        let saved = ItemFilter {
+            saved_only: true,
+            ..Default::default()
+        };
+        assert_eq!(count_unread_items(&conn, &saved).unwrap(), 80);
+        let today = ItemFilter {
+            published_from: Some(280),
+            published_to: Some(340),
+            ..Default::default()
+        };
+        assert_eq!(count_unread_items(&conn, &today).unwrap(), 40);
+        let affected = mark_items_read(&conn, &today, i64::MAX, 400).unwrap();
+        assert_eq!(affected.len(), 40);
+        assert_eq!(count_unread_items(&conn, &today).unwrap(), 0);
+        mark_items_unread(&conn, &affected).unwrap();
+        assert_eq!(count_unread_items(&conn, &today).unwrap(), 40);
+    }
+
+    #[test]
+    fn list_projection_caps_unicode_plain_text_and_preserves_original_reader_html() {
+        let conn = init_in_memory().unwrap();
+        let feed = insert_feed(&conn, "https://preview.invalid/rss", None, None, 0).unwrap();
+        let source = format!("<p>{}&amp; end</p>", "한글".repeat(1000));
+        let body = "<article>Original full body</article>";
+        upsert_items(
+            &conn,
+            feed,
+            &[NewItem {
+                summary: Some(source.clone()),
+                full_content: Some(body.into()),
+                ..sample_item("preview")
+            }],
+        )
+        .unwrap();
+        let page = list_items(&conn, &ItemFilter::default(), 50, None).unwrap();
+        assert_eq!(page[0].preview.as_ref().unwrap().chars().count(), 500);
+        assert!(!page[0].preview.as_ref().unwrap().contains('<'));
+        let json = serde_json::to_value(&page[0]).unwrap();
+        assert!(json.get("summary").is_none());
+        assert!(json.get("fullContent").is_none());
+        let original = get_item_by_id(&conn, page[0].id).unwrap().unwrap();
+        assert_eq!(original.summary, Some(source));
+        assert_eq!(original.full_content.as_deref(), Some(body));
+    }
+
     fn sample_item(guid_hash: &str) -> NewItem {
         NewItem {
+            published_at_kind: "timestamp",
             guid_hash: guid_hash.to_string(),
             title: Some("Title".to_string()),
             link: Some("https://example.com/post".to_string()),
@@ -872,6 +1218,63 @@ mod tests {
             full_content: None,
             published_at: 1_700_000_000,
             fetched_at: 1_700_000_100,
+        }
+    }
+
+    #[test]
+    fn timeline_pages_preserve_timestamp_ties_and_filters_during_new_insertions() {
+        let conn = init_in_memory().unwrap();
+        let shown = insert_feed(&conn, "https://shown.invalid/rss", None, None, 0).unwrap();
+        let hidden = insert_feed(&conn, "https://hidden.invalid/rss", None, None, 0).unwrap();
+        conn.execute("UPDATE feeds SET hidden_from_all=1 WHERE id=?1", [hidden])
+            .unwrap();
+        for feed in [shown, hidden] {
+            let rows: Vec<_> = (0..135)
+                .map(|index| NewItem {
+                    published_at: 1_700_000_000 + index / 60,
+                    ..sample_item(&format!("{feed}-{index}"))
+                })
+                .collect();
+            upsert_items(&conn, feed, &rows).unwrap();
+        }
+        for filter in [
+            ItemFilter::default(),
+            ItemFilter {
+                feed_id: Some(hidden),
+                ..Default::default()
+            },
+        ] {
+            let expected = list_items(&conn, &filter, 1000, None).unwrap();
+            assert_eq!(expected.len(), 135);
+            let first = list_items(&conn, &filter, 50, None).unwrap();
+            let newest = NewItem {
+                published_at: 1_800_000_000,
+                ..sample_item(&format!("new-{}", filter.feed_id.unwrap_or(shown)))
+            };
+            let target = filter.feed_id.unwrap_or(shown);
+            upsert_items(&conn, target, &[newest]).unwrap();
+            let mut actual = first;
+            loop {
+                let last = actual.last().unwrap();
+                let page = list_items(
+                    &conn,
+                    &filter,
+                    50,
+                    Some(ItemCursor {
+                        published_at: last.published_at,
+                        id: last.id,
+                    }),
+                )
+                .unwrap();
+                if page.is_empty() {
+                    break;
+                }
+                actual.extend(page);
+            }
+            assert_eq!(
+                actual, expected,
+                "newer rows must not shift an existing cursor traversal"
+            );
         }
     }
 
@@ -1047,11 +1450,11 @@ mod tests {
 
         // A later failure for `a` keeps the stored icon.
         save_feed_icon(&conn, a, "", &[], None, 200).unwrap();
-        let icons = list_feed_icons(&conn).unwrap();
+        let icons = list_feed_icons(&conn, &[a, b]).unwrap();
         assert_eq!(icons, [(a, "image/png".to_string(), b"png".to_vec())]);
 
         delete_feed(&conn, a).unwrap();
-        assert!(list_feed_icons(&conn).unwrap().is_empty());
+        assert!(list_feed_icons(&conn, &[a, b]).unwrap().is_empty());
     }
 
     #[test]
@@ -1271,6 +1674,46 @@ mod tests {
     }
 
     #[test]
+    fn reorder_feeds_in_folder_rewrites_only_that_folders_positions() {
+        let conn = init_in_memory().unwrap();
+        let folder_id = create_feed_folder(&conn, "Folder", 0).unwrap();
+        let a = insert_feed(&conn, "https://a.example/feed.xml", None, None, 0).unwrap();
+        let b = insert_feed(&conn, "https://b.example/feed.xml", None, None, 0).unwrap();
+        let c = insert_feed(&conn, "https://c.example/feed.xml", None, None, 0).unwrap();
+        update_feed_organization(&conn, a, Some(folder_id), false).unwrap();
+        update_feed_organization(&conn, b, Some(folder_id), false).unwrap();
+        // `c` stays unfiled - a stale id passed for the wrong folder is ignored.
+
+        reorder_feeds_in_folder(&conn, Some(folder_id), &[b, a, c]).unwrap();
+
+        let feeds = list_feeds(&conn).unwrap();
+        let by_id = |id: i64| feeds.iter().find(|f| f.id == id).unwrap();
+        assert_eq!(by_id(b).sort_order, 0);
+        assert_eq!(by_id(a).sort_order, 1);
+        assert_eq!(
+            by_id(c).sort_order,
+            0,
+            "unfiled feed untouched by the folder reorder"
+        );
+        assert_eq!(by_id(c).folder_id, None);
+    }
+
+    #[test]
+    fn set_feed_pinned_toggles_and_reports_unknown_feeds() {
+        let conn = init_in_memory().unwrap();
+        let feed_id = insert_feed(&conn, "https://example.com/feed.xml", None, None, 0).unwrap();
+        assert!(!get_feed_by_id(&conn, feed_id).unwrap().unwrap().pinned);
+
+        assert!(set_feed_pinned(&conn, feed_id, true).unwrap());
+        assert!(get_feed_by_id(&conn, feed_id).unwrap().unwrap().pinned);
+
+        assert!(set_feed_pinned(&conn, feed_id, false).unwrap());
+        assert!(!get_feed_by_id(&conn, feed_id).unwrap().unwrap().pinned);
+
+        assert!(!set_feed_pinned(&conn, feed_id + 1, true).unwrap());
+    }
+
+    #[test]
     fn feed_meta_defaults_and_not_modified_update() {
         let conn = init_in_memory().unwrap();
         let feed_id = insert_feed(&conn, "https://example.com/feed.xml", None, None, 0).unwrap();
@@ -1365,7 +1808,7 @@ mod tests {
     }
 
     fn sample_item_id(conn: &Connection) -> i64 {
-        let feed_id = insert_feed(&conn, "https://example.com/feed.xml", None, None, 0).unwrap();
+        let feed_id = insert_feed(conn, "https://example.com/feed.xml", None, None, 0).unwrap();
         upsert_items(conn, feed_id, &[sample_item("guid-1")]).unwrap();
         list_items(conn, &ItemFilter::default(), 10, None).unwrap()[0].id
     }

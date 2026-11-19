@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, Result};
 
-use super::{schema, search};
+use super::{resources, schema, search};
 
 const DB_FILE_NAME: &str = "aequo.db";
 
@@ -21,6 +21,7 @@ pub fn init(db_path: &Path) -> Result<Connection> {
     // Before any schema work: the search-index triggers call strip_html.
     search::register_functions(&conn)?;
     schema::apply(&conn)?;
+    resources::init(&conn)?;
     search::apply(&conn)?;
     Ok(conn)
 }
@@ -31,6 +32,7 @@ pub fn init_in_memory() -> Result<Connection> {
     conn.pragma_update(None, "foreign_keys", true)?;
     search::register_functions(&conn)?;
     schema::apply(&conn)?;
+    resources::init(&conn)?;
     search::apply(&conn)?;
     Ok(conn)
 }

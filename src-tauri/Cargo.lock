@@ -14,6 +14,7 @@ version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "dom_query 0.28.0",
  "feed-rs",
  "legible",
  "quick-xml 0.41.0",

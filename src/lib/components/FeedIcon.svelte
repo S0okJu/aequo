@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { feedIconUrl } from '$lib/feedIcons.svelte';
+  import { untrack } from 'svelte';
+  import { feedIconUrl, watchFeedIcon } from '$lib/feedIcons.svelte';
   import { feedDisplayName } from '$lib/format';
 
   interface Props {
@@ -13,6 +14,10 @@
   // Never rendered via {@html} or inline <svg>: an <img> with a data: URI is
   // what keeps a stored SVG icon from running scripts (§3.12).
   const src = $derived(feed ? feedIconUrl(feed.id) : undefined);
+  $effect(() => {
+    const id = feed?.id;
+    if (id !== undefined) return untrack(() => watchFeedIcon(id));
+  });
   let broken = $state(false);
   $effect(() => {
     void src;

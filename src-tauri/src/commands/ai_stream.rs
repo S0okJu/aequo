@@ -13,6 +13,10 @@
 
 use serde_json::Value;
 
+pub(super) const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
+const OUTPUT_LIMIT_ERROR: &str =
+    "AI answer exceeded the 1 MiB display limit. The original CLI transcript is unchanged.";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum StreamUpdate {
     /// Append to the answer shown so far.
@@ -78,6 +82,9 @@ impl StreamParser {
                         if chunk.is_empty() {
                             return Vec::new();
                         }
+                        if self.text.len().saturating_add(chunk.len()) > MAX_OUTPUT_BYTES {
+                            return vec![StreamUpdate::Error(OUTPUT_LIMIT_ERROR.into())];
+                        }
                         self.text.push_str(chunk);
                         vec![StreamUpdate::Delta(chunk.to_string())]
                     }
@@ -96,6 +103,10 @@ impl StreamParser {
                     updates.push(StreamUpdate::Session(id.to_string()));
                 }
                 let result = event["result"].as_str().unwrap_or_default();
+                if result.len() > MAX_OUTPUT_BYTES {
+                    updates.push(StreamUpdate::Error(OUTPUT_LIMIT_ERROR.into()));
+                    return updates;
+                }
                 if event["is_error"].as_bool().unwrap_or(false) {
                     updates.push(StreamUpdate::Error(if result.is_empty() {
                         "Claude Code could not complete this request.".to_string()
@@ -137,6 +148,9 @@ impl StreamParser {
                 let kind = item["type"].as_str().unwrap_or_default();
                 match item["text"].as_str() {
                     Some(text) if kind == "agent_message" || kind == "assistant_message" => {
+                        if text.len() > MAX_OUTPUT_BYTES {
+                            return vec![StreamUpdate::Error(OUTPUT_LIMIT_ERROR.into())];
+                        }
                         self.text = text.to_string();
                         vec![StreamUpdate::Replace(text.to_string())]
                     }
@@ -205,6 +219,46 @@ mod tests {
                 StreamUpdate::Session("11111111-2222-4333-8444-555555555555".to_string()),
                 StreamUpdate::Replace("hello world".to_string()),
                 StreamUpdate::Done("hello world".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn bounds_multibyte_accumulation_and_whole_answer_replacements() {
+        let mut claude = StreamParser::new("claude");
+        let chunk = "한".repeat(MAX_OUTPUT_BYTES / 6);
+        let event = serde_json::json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":chunk}}}).to_string();
+        assert!(matches!(
+            &claude.feed_line(&event)[0],
+            StreamUpdate::Delta(_)
+        ));
+        assert!(matches!(
+            &claude.feed_line(&event)[0],
+            StreamUpdate::Delta(_)
+        ));
+        let before = claude.text().len();
+        assert!(matches!(
+            &claude.feed_line(&event)[0],
+            StreamUpdate::Error(_)
+        ));
+        assert_eq!(claude.text().len(), before);
+        assert!(before <= MAX_OUTPUT_BYTES);
+        let oversized = "x".repeat(MAX_OUTPUT_BYTES + 1);
+        let mut codex = StreamParser::new("codex");
+        let event = serde_json::json!({"type":"item.completed","item":{"type":"agent_message","text":oversized}}).to_string();
+        assert!(matches!(
+            &codex.feed_line(&event)[0],
+            StreamUpdate::Error(_)
+        ));
+        assert!(codex.text().is_empty());
+        let event =
+            serde_json::json!({"type":"result","result":oversized,"session_id":"kept-session"})
+                .to_string();
+        assert_eq!(
+            claude.feed_line(&event),
+            [
+                StreamUpdate::Session("kept-session".into()),
+                StreamUpdate::Error(OUTPUT_LIMIT_ERROR.into())
             ]
         );
     }

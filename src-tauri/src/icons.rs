@@ -10,11 +10,12 @@ use std::time::Duration;
 
 use rusqlite::Connection;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::Notify;
 
 use crate::db;
 use crate::fetch::favicon;
+use crate::resource_policy::ResourcePolicy;
 
 /// Wakes the sync loop early (e.g. right after a feed is added).
 #[derive(Clone, Default)]
@@ -36,16 +37,26 @@ fn now_unix() -> i64 {
 }
 
 pub async fn run<R: Runtime>(conn: Arc<Mutex<Connection>>, app: AppHandle<R>, wake: IconSync) {
+    let policy = app.state::<ResourcePolicy>().inner().clone();
+    let mut policy_changes = policy.subscribe();
     loop {
-        sync_due(&conn, &app).await;
+        sync_due(&conn, &app, &policy).await;
         tokio::select! {
             _ = wake.0.notified() => {}
             _ = tokio::time::sleep(PERIODIC_CHECK) => {}
+            _ = policy_changes.changed() => {}
         }
     }
 }
 
-async fn sync_due<R: Runtime>(conn: &Arc<Mutex<Connection>>, app: &AppHandle<R>) {
+async fn sync_due<R: Runtime>(
+    conn: &Arc<Mutex<Connection>>,
+    app: &AppHandle<R>,
+    policy: &ResourcePolicy,
+) {
+    if !policy.optional_allowed() {
+        return;
+    }
     let now = now_unix();
     let due = {
         let Ok(conn) = conn.lock() else { return };
@@ -58,6 +69,9 @@ async fn sync_due<R: Runtime>(conn: &Arc<Mutex<Connection>>, app: &AppHandle<R>)
     };
 
     for (feed_id, url) in due {
+        if !policy.optional_allowed() {
+            break;
+        }
         // Network first, lock only for the write.
         let icon = favicon::fetch_for_feed(&url).await;
         let Ok(conn) = conn.lock() else { return };

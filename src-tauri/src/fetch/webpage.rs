@@ -1,211 +1,298 @@
-//! Best-effort article-list extraction for public HTML pages without a feed.
-//! Site layouts vary, so this intentionally extracts ordinary article links
-//! and nearby machine-readable dates rather than trying to render JavaScript.
-//! Tag/category links are excluded via path and attribute heuristics, and a
-//! heading-like inner tag (`<h1>`-`<h3>`/`<strong>`) is preferred for the
-//! title when present. Feed autodiscovery (following a `<link rel=
-//! "alternate">` tag) is a deliberate non-goal of this fallback.
-
+//! Article-list extraction using DOM card boundaries, never adjacent byte ranges.
+use crate::db::{NewItem, url_identity};
 use chrono::{DateTime, NaiveDate};
+use dom_query::{Document, NodeRef, Selection};
 use regex::Regex;
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
+use std::sync::OnceLock;
 use url::Url;
 
-use crate::db::NewItem;
+pub const PARSER_VERSION: i64 = 1;
+const HEADINGS: &str = "h1,h2,h3,h4,h5,h6,strong";
+const CARDS: &str = "article,.article-excerpt,.post-card,.blog-card,.post-item,.entry,.h-entry,[itemtype$='BlogPosting']";
+const META: &str = "[itemprop='datePublished'],.article-excerpt-meta,.post-meta,.entry-meta,.published,.post-date,.date";
 
 pub struct WebpageListing {
     pub title: Option<String>,
     pub items: Vec<NewItem>,
+    /// Positively identified navigation/metadata URLs. Absence is never rejection.
+    pub rejected_links: Vec<String>,
+}
+
+fn selection(node: NodeRef<'_>) -> Selection<'_> {
+    Selection::from(node)
+}
+fn text(node: NodeRef<'_>) -> String {
+    node.text().split_whitespace().collect::<Vec<_>>().join(" ")
+}
+fn is_heading(node: NodeRef<'_>) -> bool {
+    selection(node).is(HEADINGS)
+}
+fn is_metadata(node: NodeRef<'_>) -> bool {
+    let s = selection(node);
+    s.is("[rel~='author'],[rel~='tag'],.author,.byline,.tag,.category,.article-excerpt-meta,.post-meta,.entry-meta")
+}
+fn excluded(node: NodeRef<'_>) -> bool {
+    std::iter::once(node)
+        .chain(node.ancestors_it(None))
+        .any(|n| {
+            let s = selection(n);
+            s.is("nav,footer,aside,script,style,template,[role='navigation'],[role='contentinfo']")
+            || is_metadata(n)
+            // A header inside a card can contain its real headline.
+            || (s.is("header") && !n.ancestors_it(None).any(|a| selection(a).is(CARDS)))
+        })
+}
+fn card_for(node: NodeRef<'_>) -> Option<NodeRef<'_>> {
+    node.ancestors_it(None)
+        .find(|n| selection(*n).is(CARDS))
+        .or_else(|| {
+            // Unnamed repeated card wrappers (including a whole-card anchor).
+            std::iter::once(node)
+                .chain(node.ancestors_it(Some(4)))
+                .find(|n| {
+                    let s = selection(*n);
+                    !s.is("body,html,main,section")
+                        && !s.select(HEADINGS).is_empty()
+                        && !s.select("time,.post-date,.date").is_empty()
+                        && s.select("h1,h2,h3,h4,h5,h6,strong").nodes().len() == 1
+                })
+        })
+}
+fn heading_for(node: NodeRef<'_>) -> Option<NodeRef<'_>> {
+    selection(node)
+        .select(HEADINGS)
+        .nodes()
+        .first()
+        .copied()
+        .or_else(|| node.ancestors_it(Some(3)).find(|n| is_heading(*n)))
+}
+
+/// Returns (unix seconds, timestamp/date precision). Ambiguous dates stay unknown.
+fn date_value(value: &str, day_first: Option<bool>) -> Option<(i64, &'static str)> {
+    let value = value.trim();
+    if let Ok(date) = DateTime::parse_from_rfc3339(value) {
+        return Some((date.timestamp(), "timestamp"));
+    }
+    static SPACE: OnceLock<Regex> = OnceLock::new();
+    let compact = SPACE
+        .get_or_init(|| Regex::new(r"\s+").unwrap())
+        .replace_all(value, " ")
+        .to_string();
+    for format in [
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+        "%Y. %m. %d",
+        "%Y.%m.%d",
+        "%b %d, %Y",
+        "%B %d, %Y",
+    ] {
+        if let Ok(date) = NaiveDate::parse_from_str(&compact, format) {
+            return Some((date.and_hms_opt(0, 0, 0)?.and_utc().timestamp(), "date"));
+        }
+    }
+    let parts: Vec<_> = value.split('/').collect();
+    if parts.len() == 3 && parts[2].len() == 4 {
+        let a: u32 = parts[0].parse().ok()?;
+        let b: u32 = parts[1].parse().ok()?;
+        let order = if a > 12 {
+            Some(true)
+        } else if b > 12 {
+            Some(false)
+        } else if a == b {
+            Some(true)
+        } else {
+            day_first
+        }?;
+        let (day, month) = if order { (a, b) } else { (b, a) };
+        let date = NaiveDate::from_ymd_opt(parts[2].parse().ok()?, month, day)?;
+        return Some((date.and_hms_opt(0, 0, 0)?.and_utc().timestamp(), "date"));
+    }
+    None
+}
+fn visible_date(value: &str) -> Option<String> {
+    static VISIBLE: OnceLock<Regex> = OnceLock::new();
+    let re = VISIBLE.get_or_init(||Regex::new(r"(?i)\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|20\d{2}\.\s*\d{1,2}\.\s*\d{1,2}|\d{1,2}/\d{1,2}/20\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},\s+20\d{2})\b").unwrap());
+    re.find(value).map(|m| m.as_str().to_string())
+}
+fn is_updated(node: NodeRef<'_>, card: NodeRef<'_>) -> bool {
+    std::iter::once(node)
+        .chain(node.ancestors_it(None).take_while(|a| a.id != card.id))
+        .any(|n| selection(n).is(".updated,.modified,[itemprop='dateModified']"))
+}
+fn date_texts(card: NodeRef<'_>) -> Vec<String> {
+    let s = selection(card);
+    let explicit = s.select(META);
+    if !explicit.is_empty() {
+        return explicit
+            .nodes()
+            .iter()
+            .filter(|n| !is_updated(**n, card))
+            .map(|n| text(*n))
+            .collect();
+    }
+    // Kyverno featured card uses a direct span; do not scan headline/summary text.
+    s.select("span,time")
+        .nodes()
+        .iter()
+        .filter(|n| {
+            !is_updated(**n, card)
+                && !n
+                    .ancestors_it(None)
+                    .take_while(|a| a.id != card.id)
+                    .any(|a| is_heading(a) || selection(a).is("p"))
+        })
+        .map(|n| text(*n))
+        .collect()
+}
+fn card_date(card: NodeRef<'_>, day_first: Option<bool>) -> Option<(i64, &'static str)> {
+    let s = selection(card);
+    for el in s.select("time[datetime],[itemprop='datePublished']").iter() {
+        if el.nodes().first().is_some_and(|n| is_updated(*n, card)) {
+            continue;
+        }
+        let raw = el
+            .attr("datetime")
+            .or_else(|| el.attr("content"))
+            .unwrap_or_else(|| el.text());
+        if let Some(date) = date_value(&raw, day_first) {
+            return Some(date);
+        }
+    }
+    date_texts(card)
+        .iter()
+        .filter_map(|t| visible_date(t))
+        .find_map(|d| date_value(&d, day_first))
 }
 
 pub fn parse(url: &str, bytes: &[u8], fetched_at: i64) -> Result<WebpageListing, String> {
     let html = String::from_utf8_lossy(bytes);
-    let lower_html = html.to_ascii_lowercase();
-    if !lower_html.contains("<html") && !lower_html.contains("<article") {
+    let lower = html.to_ascii_lowercase();
+    if !lower.contains("<html") && !lower.contains("<article") {
         return Err("URL did not return a supported feed or HTML page".into());
     }
-
     let base = Url::parse(url).map_err(|e| e.to_string())?;
-    let title_re = Regex::new(r"(?is)<title[^>]*>(.*?)</title>").unwrap();
-    let anchor_re =
-        Regex::new(r#"(?is)<a\b([^>]*?)href\s*=\s*['"]([^'"]+)['"]([^>]*)>(.*?)</a\s*>"#).unwrap();
-    let date_re = Regex::new(r#"(?is)<time\b[^>]*datetime\s*=\s*['"]([^'"]+)['"][^>]*>"#).unwrap();
-    let visible_date_re = Regex::new(r"\b(20\d{2}[./-]\s*\d{1,2}[./-]\s*\d{1,2})\b").unwrap();
-    // Taxonomy/archive path segments common across WordPress, Ghost, Hugo, Jekyll, Astro.
-    let taxonomy_href_re =
-        Regex::new(r"(?i)/(tags?|categor(?:y|ies)|topics?|labels?)/").unwrap();
-    // rel="tag" is WordPress's the_tags() microformats2 convention; class="...tag.../
-    // category.../topic.../label..." is the common theme convention.
-    let taxonomy_attr_re = Regex::new(
-        r#"(?i)\b(?:class|rel)\s*=\s*['"][^'"]*\b(?:tags?|categor\w*|topics?|labels?)\b[^'"]*['"]"#,
-    )
-    .unwrap();
-    // Headline-like inner tag. The `regex` crate has no backreferences, so this
-    // doesn't require the closing tag to match the opening one - acceptable for
-    // best-effort HTML given the file's existing non-greedy `(.*?)` limits.
-    let heading_re =
-        Regex::new(r"(?is)<(?:h[1-3]|strong)\b[^>]*>(.*?)</(?:h[1-3]|strong)>").unwrap();
-    let site_title = title_re
-        .captures(&html)
-        .and_then(|c| c.get(1))
-        .map(|m| clean_text(m.as_str()));
+    let base_key = url_identity::key(url);
+    let doc = Document::from(html.as_ref());
+    let site_title = doc
+        .select("title")
+        .text()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let anchors = doc.select("a[href]");
+    let has_cards = anchors
+        .nodes()
+        .iter()
+        .any(|a| !excluded(*a) && heading_for(*a).is_some());
+    // Infer locale only from explicit date metadata, never a title's numbers.
+    let mut orders = HashSet::new();
+    for card in doc.select(CARDS).nodes() {
+        for raw in date_texts(*card).iter().filter_map(|s| visible_date(s)) {
+            let p: Vec<_> = raw.split('/').collect();
+            if p.len() == 3 && p[2].len() == 4 {
+                let a = p[0].parse::<u32>().unwrap_or(0);
+                let b = p[1].parse::<u32>().unwrap_or(0);
+                if a > 12 && b <= 12 {
+                    orders.insert(true);
+                } else if b > 12 && a <= 12 {
+                    orders.insert(false);
+                }
+            }
+        }
+    }
+    let day_first = if orders.len() == 1 {
+        orders.iter().next().copied()
+    } else {
+        None
+    };
+    let taxonomy = Regex::new(r"(?i)/(tags?|categor(?:y|ies)|topics?|labels?|authors?)/").unwrap();
+    let mut seen = HashSet::new();
+    let mut rejected = HashSet::new();
     let mut items = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-
-    for captures in anchor_re.captures_iter(&html) {
-        let href = captures.get(2).unwrap().as_str().trim();
-        let link = match base.join(href) {
-            Ok(link) => link,
-            Err(_) => continue,
+    for node in anchors.nodes() {
+        let href = node.attr("href").unwrap();
+        let Ok(mut link) = base.join(&href) else {
+            continue;
         };
-        if !matches!(link.scheme(), "http" | "https")
-            || link.host_str() != base.host_str()
-            || link.path() == base.path()
+        if link.host_str() != base.host_str() || !matches!(link.scheme(), "http" | "https") {
+            continue;
+        }
+        link.set_fragment(None);
+        let Some(key) = url_identity::key(link.as_str()) else {
+            continue;
+        };
+        let heading = heading_for(*node);
+        let structured = heading.is_some() || !selection(*node).select("img").is_empty();
+        if excluded(*node)
+            || Some(&key) == base_key.as_ref()
             || link.path() == "/"
+            || (taxonomy.is_match(link.path()) && !structured)
         {
+            rejected.insert(key);
             continue;
         }
-        let inner_html = captures.get(4).unwrap().as_str();
-        let attrs = format!(
-            "{} {}",
-            captures.get(1).unwrap().as_str(),
-            captures.get(3).unwrap().as_str()
-        );
-
-        // Exclude tag/category links. The path-based signal only fires when the
-        // anchor also lacks article-like structure (no heading, no image), so a
-        // real post published under e.g. `/topics/<slug>/` isn't misclassified.
-        let has_heading_or_image = heading_re.is_match(inner_html)
-            || inner_html.to_ascii_lowercase().contains("<img");
-        let is_taxonomy_attr = taxonomy_attr_re.is_match(&attrs);
-        let is_taxonomy_path = taxonomy_href_re.is_match(link.path()) && !has_heading_or_image;
-        if is_taxonomy_attr || is_taxonomy_path {
+        // If real cards exist, a bare link isn't an article. It is not positive
+        // rejection evidence: older articles can disappear from a listing.
+        if has_cards && heading.is_none() {
             continue;
         }
-
-        let raw_title = heading_re
-            .captures(inner_html)
-            .and_then(|h| h.get(1))
-            .map(|m| m.as_str())
-            .unwrap_or(inner_html);
-        let title = strip_trailing_metadata(&clean_text(raw_title));
-        if title.len() < 4 || title.len() > 400 {
+        let title = heading.map(text).unwrap_or_else(|| text(*node));
+        let title = if heading.is_some() {
+            title
+        } else {
+            strip_trailing_metadata(&title)
+        };
+        if title.chars().count() < 4 || title.chars().count() > 400 || !seen.insert(key.clone()) {
             continue;
         }
-        let normalized = link.as_str().trim_end_matches('/').to_string();
-        if !seen.insert(normalized.clone()) {
+        if items.len() >= 100 {
             continue;
         }
-        let id = Sha256::digest(normalized.as_bytes());
-
-        // Many blog templates put <time datetime> immediately after the title
-        // within the same card. Restrict the lookahead to the next 600 bytes.
-        let end = captures.get(0).unwrap().end();
-        let tail = String::from_utf8_lossy(&html.as_bytes()[end..html.len().min(end + 600)]);
-        // Check inside the anchor first (same-card date), then fall back to the
-        // after-</a> tail lookahead for templates that render the date outside it.
-        let published_at = date_re
-            .captures(inner_html)
-            .and_then(|date| date.get(1))
-            .and_then(|m| parse_date(m.as_str()))
-            .or_else(|| {
-                visible_date_re
-                    .captures(inner_html)
-                    .and_then(|date| date.get(1))
-                    .and_then(|m| parse_date(m.as_str()))
-            })
-            .or_else(|| {
-                date_re
-                    .captures(&tail)
-                    .and_then(|date| date.get(1))
-                    .and_then(|m| parse_date(m.as_str()))
-            })
-            .or_else(|| {
-                visible_date_re
-                    .captures(&tail)
-                    .and_then(|date| date.get(1))
-                    .and_then(|m| parse_date(m.as_str()))
-            })
-            .unwrap_or(fetched_at);
+        let card = card_for(*node).or(if structured { Some(*node) } else { None });
+        let date = card.and_then(|c| card_date(c, day_first));
+        let (published_at, published_at_kind) = date.unwrap_or((fetched_at, "discovered"));
         items.push(NewItem {
-            guid_hash: format!("web:{}", hex(&id)),
+            guid_hash: format!("web:{}", hex(&Sha256::digest(key.as_bytes()))),
             title: Some(title),
-            link: Some(normalized),
+            link: Some(link.to_string()),
             summary: None,
             full_content: None,
             published_at,
+            published_at_kind,
             fetched_at,
         });
-        if items.len() >= 100 {
-            break;
-        }
+        // Continue scanning positively rejected links after the article cap.
+    }
+    // A navigation duplicate of an accepted article must never hide it.
+    for key in &seen {
+        rejected.remove(key);
     }
     if items.is_empty() {
         return Err("No article links found on this page".into());
     }
     Ok(WebpageListing {
-        title: site_title.filter(|t| !t.is_empty()),
+        title: (!site_title.is_empty()).then_some(site_title),
         items,
+        rejected_links: rejected.into_iter().collect(),
     })
 }
-
+#[cfg(test)]
 fn parse_date(value: &str) -> Option<i64> {
-    DateTime::parse_from_rfc3339(value)
-        .ok()
-        .map(|d| d.timestamp())
-        .or_else(|| {
-            NaiveDate::parse_from_str(value, "%Y-%m-%d")
-                .ok()
-                .and_then(|d| d.and_hms_opt(0, 0, 0))
-                .map(|d| d.and_utc().timestamp())
-        })
-        .or_else(|| {
-            NaiveDate::parse_from_str(value, "%Y. %-m. %-d")
-                .ok()
-                .and_then(|d| d.and_hms_opt(0, 0, 0))
-                .map(|d| d.and_utc().timestamp())
-        })
-        .or_else(|| {
-            NaiveDate::parse_from_str(value, "%Y. %m. %d")
-                .ok()
-                .and_then(|d| d.and_hms_opt(0, 0, 0))
-                .map(|d| d.and_utc().timestamp())
-        })
-        .or_else(|| {
-            NaiveDate::parse_from_str(value, "%Y/%m/%d")
-                .ok()
-                .and_then(|d| d.and_hms_opt(0, 0, 0))
-                .map(|d| d.and_utc().timestamp())
-        })
+    date_value(value, None).map(|d| d.0)
 }
-
-fn clean_text(value: &str) -> String {
-    let tag_re = Regex::new(r"(?is)<[^>]+>").unwrap();
-    tag_re
-        .replace_all(value, " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 fn strip_trailing_metadata(title: &str) -> String {
-    // Some cards render "<title> <date> <author>" with no dedicated heading
-    // tag; once flattened by clean_text(), trim a trailing visible date and
-    // anything after it so it doesn't get glued onto the headline.
-    let trailing_date_re =
-        Regex::new(r"(?i)\s+20\d{2}[./-]\s*\d{1,2}[./-]\s*\d{1,2}\b.*$").unwrap();
-    trailing_date_re.replace(title, "").trim().to_string()
+    static TRAILING: OnceLock<Regex> = OnceLock::new();
+    TRAILING
+        .get_or_init(|| Regex::new(r"(?i)\s+20\d{2}[./-]\s*\d{1,2}[./-]\s*\d{1,2}\b.*$").unwrap())
+        .replace(title, "")
+        .trim()
+        .to_string()
 }
-
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,10 +326,12 @@ mod tests {
             2,
             "tag cloud links must not be treated as articles"
         );
-        assert!(result
-            .items
-            .iter()
-            .all(|i| !i.link.as_ref().unwrap().contains("/tag/")));
+        assert!(
+            result
+                .items
+                .iter()
+                .all(|i| !i.link.as_ref().unwrap().contains("/tag/"))
+        );
 
         assert_eq!(
             result.items[0].title,
@@ -354,5 +443,127 @@ mod tests {
             Some("Second Post About Things".to_string())
         );
         assert_eq!(result.items[1].published_at, fetched_at);
+    }
+}
+
+#[cfg(test)]
+mod listing_regressions {
+    use super::*;
+    #[test]
+    fn real_listings_keep_only_articles_and_restore_dates() {
+        let kyverno = parse(
+            "https://kyverno.io/blog/",
+            include_bytes!("../../tests/fixtures/kyverno_blog.html"),
+            1_800_000_000,
+        )
+        .unwrap();
+        assert_eq!(kyverno.items.len(), 43);
+        assert!(
+            kyverno
+                .items
+                .iter()
+                .all(|i| i.published_at_kind != "discovered")
+        );
+        assert_eq!(
+            kyverno.items[0].title.as_deref(),
+            Some("Announcing Kyverno 1.20!")
+        );
+        assert_eq!(
+            kyverno.items[0].published_at,
+            parse_date("2026-11-12").unwrap()
+        );
+        assert!(
+            kyverno
+                .rejected_links
+                .contains(&"https://kyverno.io/blog".into())
+        );
+        let kata = parse(
+            "https://katacontainers.io/blog/",
+            include_bytes!("../../tests/fixtures/kata_blog.html"),
+            1_800_000_000,
+        )
+        .unwrap();
+        assert_eq!(kata.items.len(), 68);
+        assert!(kata.items.iter().all(|i| i.published_at_kind == "date"));
+        assert_eq!(
+            kata.items[0].published_at,
+            parse_date("2026-11-03").unwrap()
+        );
+        assert_eq!(
+            kata.items.last().unwrap().published_at,
+            parse_date("2019-02-20").unwrap()
+        );
+        let weekly = kata
+            .items
+            .iter()
+            .find(|i| i.title.as_deref().unwrap().starts_with("4/18,"))
+            .unwrap();
+        assert_eq!(weekly.published_at, parse_date("2019-04-22").unwrap());
+    }
+    #[test]
+    fn card_boundaries_headers_aliases_queries_and_ambiguous_dates() {
+        let html = r#"<html><header><a href='/docs'>Documentation</a></header><main>
+        <article><header><h5><a href='/blog/first/'>First Article</a></h5></header><p>Posted 2020-01-01 in a quote</p></article>
+        <article><h2><a href='/blog/second'>Second Article</a></h2><time datetime='2025-04-01'>April</time></article>
+        <article><h2><a href='/blog/third'>Third Article</a></h2><div class='post-meta'>03/04/2025</div></article>
+        <article><h2><a href='/blog/third#more'>Third Article</a></h2></article>
+        <article><h2><a href='/blog/post?id=1'>Query First Article</a></h2></article>
+        <article><h2><a href='/blog/post?id=2'>Query Second Article</a></h2></article>
+        </main><footer><a href='/blog'>Blog</a></footer></html>"#;
+        let listing = parse("https://example.com/blog/", html.as_bytes(), 999).unwrap();
+        assert_eq!(listing.items.len(), 5);
+        assert_eq!(listing.items[0].published_at_kind, "discovered");
+        assert_eq!(
+            listing.items[1].published_at,
+            parse_date("2025-04-01").unwrap()
+        );
+        assert_eq!(listing.items[2].published_at_kind, "discovered");
+        assert_eq!(
+            listing.items[0].link.as_deref(),
+            Some("https://example.com/blog/first/")
+        );
+        assert_ne!(listing.items[3].guid_hash, listing.items[4].guid_hash);
+        for base in ["https://example.com/blog", "https://example.com/blog/"] {
+            assert!(
+                !parse(base, html.as_bytes(), 999)
+                    .unwrap()
+                    .items
+                    .iter()
+                    .any(|i| i.title.as_deref() == Some("Blog"))
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod limits_and_metadata_tests {
+    use super::*;
+    #[test]
+    fn article_limit_excludes_metadata_and_still_identifies_footer_noise() {
+        let mut html = String::from("<html><main>");
+        for i in 0..110 {
+            html.push_str(&format!("<article><h5><a href='/post/{i}'>Article {i} dated 2026-01-01</a></h5><span class='updated'><time datetime='2026-10-11'>Oct 11</time></span><p>Summary from 2026-10-10</p><a rel='author' href='/author/a'>Author</a></article>"));
+        }
+        html.push_str("</main><footer><a href='/docs/'>Documentation</a></footer></html>");
+        let listing = parse("https://example.com/blog/", html.as_bytes(), 999).unwrap();
+        assert_eq!(listing.items.len(), 100);
+        assert!(
+            listing
+                .items
+                .iter()
+                .all(|i| i.published_at_kind == "discovered")
+        );
+        assert!(
+            listing.items[0]
+                .title
+                .as_deref()
+                .unwrap()
+                .ends_with("2026-01-01")
+        );
+        assert!(
+            listing
+                .rejected_links
+                .contains(&"https://example.com/docs".into())
+        );
     }
 }

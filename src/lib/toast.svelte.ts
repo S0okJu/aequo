@@ -14,6 +14,9 @@ export interface Toast {
 }
 
 const DEFAULT_DURATION_MS = 4000;
+// An undo-style action needs more time to notice and act on than a plain
+// confirmation (docs/UNIFIED_UX_MOTION_PLAN.md §3, T4 토스트).
+const WITH_ACTION_DURATION_MS = 6000;
 
 let nextId = 1;
 // Svelte doesn't allow an exported `$state` binding to be reassigned from
@@ -39,7 +42,9 @@ export function showToast(
   const id = nextId++;
   toasts.push({ id, type, message, action: opts.action });
 
-  const durationMs = opts.durationMs ?? (type === 'error' ? 0 : DEFAULT_DURATION_MS);
+  const durationMs =
+    opts.durationMs ??
+    (type === 'error' ? 0 : opts.action ? WITH_ACTION_DURATION_MS : DEFAULT_DURATION_MS);
   if (durationMs > 0) {
     timers[id] = setTimeout(() => dismissToast(id), durationMs);
   }

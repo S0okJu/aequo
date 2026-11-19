@@ -12,14 +12,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
-use tauri::{AppHandle, Runtime};
-use tokio::sync::Semaphore;
+use tauri::{AppHandle, Manager, Runtime};
 use tokio::task::JoinSet;
 use tokio::time::{Instant, sleep_until};
 
 use crate::db;
 use crate::events::emit_if_updated;
 use crate::fetch::worker::{self, PollOutcome};
+use crate::resource_policy::{ResourcePolicy, effective_due_at};
 
 /// Max simultaneous fetches (§4.2) - caps connection/CPU spikes as
 /// the feed count grows.
@@ -44,57 +44,78 @@ fn now_unix() -> i64 {
 /// number of feeds attempted, for callers that want to observe cycle
 /// size.
 pub async fn poll_due_feeds<R: Runtime>(conn: Arc<Mutex<Connection>>, app: AppHandle<R>) -> usize {
+    let policy = app.state::<ResourcePolicy>().inner().clone();
     let due = {
         let guard = conn.lock().expect("database lock poisoned");
-        db::list_due_feed_metas(&guard, now_unix()).unwrap_or_default()
+        db::list_due_feed_metas(&guard, now_unix())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|meta| {
+                effective_due_at(meta, policy.settings().min_auto_refresh_secs) <= now_unix()
+            })
+            .collect::<Vec<_>>()
     };
     let attempted = due.len();
 
-    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_FETCHES));
     let mut set = JoinSet::new();
 
     for meta in due {
-        let semaphore = semaphore.clone();
+        // Bound waiting tasks too: do not spawn one future per subscription.
+        while set.len() >= MAX_CONCURRENT_FETCHES {
+            if let Some(joined) = set.join_next().await {
+                handle_result(&app, joined);
+            }
+        }
         let conn = conn.clone();
+        let policy = policy.clone();
         set.spawn(async move {
-            let _permit = semaphore.acquire().await.expect("semaphore closed");
             let feed_id = meta.id;
             let url = meta.url.clone();
-            (feed_id, url, worker::poll_feed_locked(&conn, &meta).await)
+            (
+                feed_id,
+                url,
+                worker::poll_feed_locked(&conn, &meta, &policy, false).await,
+            )
         });
     }
 
     while let Some(joined) = set.join_next().await {
-        match joined {
-            Ok((feed_id, _, Ok(outcome))) => {
-                // Recorded to last_error/consecutive_failures already
-                // (§7) - still logged here so failures are visible
-                // without needing to query the DB.
-                if let PollOutcome::Failed { error } = &outcome {
-                    eprintln!("poll failed for feed {feed_id}: {error}");
-                }
-                emit_if_updated(&app, feed_id, &outcome);
-            }
-            // A hard Err means the DB write itself failed (lock
-            // poisoned, disk error, etc.) - an infra problem, not a
-            // feed-specific one, so it couldn't be recorded to
-            // last_error.
-            Ok((_, url, Err(err))) => eprintln!("poll failed for {url}: {err}"),
-            Err(join_err) => eprintln!("fetch task panicked: {join_err}"),
-        }
+        handle_result(&app, joined);
     }
 
     attempted
 }
 
+type PollResult = Result<(i64, String, Result<PollOutcome, String>), tokio::task::JoinError>;
+
+fn handle_result<R: Runtime>(app: &AppHandle<R>, joined: PollResult) {
+    match joined {
+        Ok((feed_id, _, Ok(outcome))) => {
+            // Recorded to last_error/consecutive_failures already
+            // (§7) - still logged here so failures are visible
+            // without needing to query the DB.
+            if let PollOutcome::Failed { error } = &outcome {
+                eprintln!("poll failed for feed {feed_id}: {error}");
+            }
+            emit_if_updated(app, feed_id, &outcome);
+        }
+        // A hard Err means the DB write itself failed (lock
+        // poisoned, disk error, etc.) - an infra problem, not a
+        // feed-specific one, so it couldn't be recorded to
+        // last_error.
+        Ok((_, url, Err(err))) => eprintln!("poll failed for {url}: {err}"),
+        Err(join_err) => eprintln!("fetch task panicked: {join_err}"),
+    }
+}
+
 /// Earliest `next_fetch_at` across all feeds, as a monotonic
 /// [`Instant`] the scheduler should sleep until (§4.3). Falls back to
 /// [`IDLE_FALLBACK`] when there are no feeds yet.
-fn next_wake(conn: &Connection) -> Instant {
+fn next_wake(conn: &Connection, minimum_secs: u32) -> Instant {
     let earliest = db::list_feed_metas(conn)
         .unwrap_or_default()
         .into_iter()
-        .map(|m| m.next_fetch_at)
+        .map(|m| effective_due_at(&m, minimum_secs))
         .min();
 
     match earliest {
@@ -115,14 +136,17 @@ pub async fn run<R: Runtime>(
     app: AppHandle<R>,
     schedule_changed: Arc<tokio::sync::Notify>,
 ) {
+    let policy = app.state::<ResourcePolicy>().inner().clone();
+    let mut policy_changes = policy.subscribe();
     loop {
         let wake_at = {
             let guard = conn.lock().expect("database lock poisoned");
-            next_wake(&guard)
+            next_wake(&guard, policy.settings().min_auto_refresh_secs)
         };
         tokio::select! {
             _ = sleep_until(wake_at) => {},
             _ = schedule_changed.notified() => continue,
+            _ = policy_changes.changed() => continue,
         }
         poll_due_feeds(conn.clone(), app.clone()).await;
     }
@@ -151,7 +175,17 @@ mod tests {
     /// feature) - `emit_if_updated` needs one to call, but these
     /// tests don't care whether anything is actually listening.
     fn mock_app_handle() -> AppHandle<tauri::test::MockRuntime> {
-        tauri::test::mock_app().handle().clone()
+        let app = tauri::test::mock_app();
+        let policy = ResourcePolicy::default();
+        policy.apply(crate::db::resources::ResourceSnapshot {
+            revision: 1,
+            settings: crate::db::resources::ResourceSettings::preset(
+                crate::db::resources::ResourceMode::Fast,
+            )
+            .unwrap(),
+        });
+        app.manage(policy);
+        app.handle().clone()
     }
 
     /// Indirect but reliable way to verify the semaphore actually
@@ -230,6 +264,7 @@ mod tests {
 
             let items = (0..250)
                 .map(|item_index| crate::db::NewItem {
+                    published_at_kind: "timestamp",
                     guid_hash: format!("{feed_index}-{item_index}"),
                     title: Some(format!("Article {item_index}")),
                     link: Some(format!("https://feed-{feed_index}.example/{item_index}")),
@@ -382,7 +417,7 @@ mod tests {
         db::update_feed_not_modified(&conn, soon_id, now + 5).unwrap();
         db::update_feed_not_modified(&conn, later_id, now + 500).unwrap();
 
-        let wake = next_wake(&conn);
+        let wake = next_wake(&conn, 0);
         let delay = wake.saturating_duration_since(Instant::now());
         assert!(
             delay <= Duration::from_secs(6),
@@ -393,7 +428,7 @@ mod tests {
     #[test]
     fn next_wake_falls_back_when_no_feeds() {
         let conn = init_in_memory().unwrap();
-        let wake = next_wake(&conn);
+        let wake = next_wake(&conn, 0);
         let delay = wake.saturating_duration_since(Instant::now());
         assert!(
             delay >= Duration::from_secs(55),

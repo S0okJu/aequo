@@ -19,7 +19,24 @@ import type {
   CleanupPreview,
   CleanupResult,
   FeedFolder,
+  ResourceSettings,
+  ResourceStatus,
 } from './types';
+
+export function getResourceSettings(): Promise<ResourceStatus> {
+  return invoke('get_resource_settings');
+}
+
+export function setResourceSettings(
+  expectedRevision: number,
+  settings: ResourceSettings,
+): Promise<ResourceStatus> {
+  return invoke('set_resource_settings', { expectedRevision, settings });
+}
+
+export function setResourceVisibility(hidden: boolean): Promise<void> {
+  return invoke('set_resource_visibility', { hidden });
+}
 
 export function listFeeds(): Promise<FeedSummary[]> {
   return invoke('list_feeds');
@@ -49,6 +66,15 @@ export function updateFeedOrganization(
   return invoke('update_feed_organization', { feedId, folderId, hiddenFromAll });
 }
 
+/** Rewrites feed order within one folder (or the unfiled group, `folderId: null`). */
+export function reorderFeedsInFolder(folderId: number | null, feedIds: number[]): Promise<void> {
+  return invoke('reorder_feeds_in_folder', { folderId, feedIds });
+}
+
+export function setFeedPinned(feedId: number, pinned: boolean): Promise<void> {
+  return invoke('set_feed_pinned', { feedId, pinned });
+}
+
 /** Sets the feed's display name; null or blank restores its own title. */
 export function renameFeed(feedId: number, title: string | null): Promise<void> {
   return invoke('rename_feed', { feedId, title });
@@ -64,22 +90,28 @@ export function setFeedRefreshInterval(feedId: number, intervalSecs: number): Pr
 }
 
 /** Stored feed icons as `data:` URIs keyed by feed id (fetched in the background). */
-export function getFeedIcons(): Promise<Record<number, string>> {
-  return invoke('get_feed_icons');
+export function getFeedIcons(feedIds: number[]): Promise<Record<number, string>> {
+  return invoke('get_feed_icons', { feedIds });
 }
 
 export type ItemCursor = { publishedAt: number; id: number };
+
+export function countUnreadItems(filter: ItemFilter): Promise<number> {
+  return invoke('count_unread_items', { filter });
+}
 
 export function listItems(
   filter: ItemFilter,
   limit: number,
   cursor: ItemCursor | null = null,
+  direction: 'older' | 'newer' = 'older',
 ): Promise<Item[]> {
   return invoke('list_items', {
     filter,
     limit,
     cursorPublishedAt: cursor?.publishedAt ?? null,
     cursorId: cursor?.id ?? null,
+    newer: direction === 'newer',
   });
 }
 
@@ -128,6 +160,24 @@ export function refreshFeed(feedId: number): Promise<string> {
   return invoke('refresh_feed', { feedId });
 }
 
+/** Bound outstanding IPC requests too; the backend enforces the live policy. */
+export async function refreshFeedBatch(feedIds: number[]): Promise<{ failed: number }> {
+  let next = 0;
+  let failed = 0;
+  async function worker() {
+    while (next < feedIds.length) {
+      const id = feedIds[next++];
+      try {
+        await refreshFeed(id);
+      } catch {
+        failed++;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, feedIds.length) }, () => worker()));
+  return { failed };
+}
+
 export function deleteFeed(feedId: number): Promise<void> {
   return invoke('delete_feed', { feedId });
 }
@@ -136,8 +186,15 @@ export function listAiSessions(itemId: number, provider: AiProvider): Promise<Ai
   return invoke('list_ai_sessions', { itemId, provider });
 }
 
-export function loadAiTranscript(sessionId: number): Promise<AiTranscript> {
-  return invoke('load_ai_transcript', { sessionId });
+export function loadAiTranscript(
+  sessionId: number,
+  cursor: { before?: number; after?: number } = {},
+): Promise<AiTranscript> {
+  return invoke('load_ai_transcript', {
+    sessionId,
+    before: cursor.before ?? null,
+    after: cursor.after ?? null,
+  });
 }
 
 /**
@@ -145,12 +202,13 @@ export function loadAiTranscript(sessionId: number): Promise<AiTranscript> {
  * arrives as `ai-stream` events (see `AiStreamEvent`).
  */
 export function startAiMessage(
-  itemId: number,
+  contextItemIds: number[],
   provider: AiProvider,
   sessionId: number | null,
   prompt: string,
+  scopeLabel: string | null = null,
 ): Promise<AiStart> {
-  return invoke('start_ai_message', { itemId, provider, sessionId, prompt });
+  return invoke('start_ai_message', { contextItemIds, provider, sessionId, prompt, scopeLabel });
 }
 
 /** Stops a run; it ends with a `cancelled` event carrying the text so far. */
@@ -162,8 +220,20 @@ export function deleteAiSession(sessionId: number): Promise<void> {
   return invoke('delete_ai_session', { sessionId });
 }
 
-export function loadArticle(itemId: number, forceRefresh = false): Promise<ArticleView> {
-  return invoke('load_article', { itemId, forceRefresh });
+export function getItemSummary(itemId: number): Promise<Item | null> {
+  return invoke('get_item_summary', { itemId });
+}
+
+export function loadArticle(
+  itemId: number,
+  forceRefresh: boolean,
+  requestRevision: number,
+): Promise<ArticleView> {
+  return invoke('load_article', { itemId, forceRefresh, requestRevision });
+}
+
+export function cancelArticleRead(requestRevision: number): Promise<void> {
+  return invoke('cancel_article_read', { requestRevision });
 }
 
 export function listItemAnnotations(itemId: number): Promise<Annotation[]> {
@@ -216,4 +286,17 @@ export function updateAnnotation(params: {
 
 export function deleteAnnotation(id: number): Promise<void> {
   return invoke('delete_annotation', { id });
+}
+
+export function listAllAiSessions(provider: AiProvider | null = null): Promise<AiSession[]> {
+  return invoke('list_all_ai_sessions', { provider });
+}
+export function latestAiSessionForItem(itemId: number): Promise<AiSession | null> {
+  return invoke('latest_ai_session_for_item', { itemId });
+}
+export function addAiContextItems(sessionId: number, itemIds: number[]): Promise<AiSession> {
+  return invoke('add_ai_context_items', { sessionId, itemIds });
+}
+export function removeAiContextItem(sessionId: number, position: number): Promise<AiSession> {
+  return invoke('remove_ai_context_item', { sessionId, position });
 }

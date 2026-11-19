@@ -2,7 +2,7 @@
 // the same string for the same value (docs/UI_SIMPLIFICATION_PLAN.md §3.1,
 // §3.15). `locale` defaults to the app language (src/lib/i18n).
 
-import { currentLocale } from '$lib/i18n/index.svelte';
+import { currentLocale, t } from '$lib/i18n/index.svelte';
 
 const MINUTE = 60;
 const HOUR = 60 * MINUTE;
@@ -42,10 +42,14 @@ export function formatDayHeading(
   unixSecs: number,
   nowSecs = Date.now() / 1000,
   locale: string = currentLocale(),
+  dateOnly = false,
 ): string {
   const date = new Date(unixSecs * 1000);
-  const sameYear = date.getFullYear() === new Date(nowSecs * 1000).getFullYear();
+  const sameYear =
+    (dateOnly ? date.getUTCFullYear() : date.getFullYear()) ===
+    new Date(nowSecs * 1000).getFullYear();
   return new Intl.DateTimeFormat(locale, {
+    ...(dateOnly ? { timeZone: 'UTC' } : {}),
     weekday: 'long',
     month: 'long',
     day: 'numeric',
@@ -66,6 +70,14 @@ export function stripSyndicationFooter(text: string | null | undefined): string 
   return stripped || null;
 }
 
+/** Whether a feed's last refresh failed; the sidebar and its footer agree on this. */
+export function feedHasError(feed: {
+  lastError: string | null;
+  consecutiveFailures: number;
+}): boolean {
+  return feed.lastError !== null || feed.consecutiveFailures > 0;
+}
+
 /** The name to show for a feed: the user's display name, else its trimmed title, else its URL. */
 export function feedDisplayName(feed: {
   title: string | null;
@@ -83,6 +95,34 @@ export function feedDisplayName(feed: {
 export function shortFeedTitle(title: string | null | undefined, fallback = ''): string {
   const name = (title ?? '').trim();
   if (!name) return fallback;
-  const head = name.split(/\s+[|–—-]\s+/)[0].trim();
+  const parts = name.split(/\s+[|–—-]\s+/).map((part) => part.trim());
+  const head = /^(blog|news|블로그|소식)$/i.test(parts[0]) && parts[1] ? parts[1] : parts[0];
   return head.length >= 2 ? head : name;
+}
+
+interface ArticleDate {
+  publishedAt: number;
+  publishedAtKind?: 'timestamp' | 'date' | 'discovered';
+}
+
+/** Date-only source values keep their calendar date across user time zones. */
+export function articleDayKey(item: ArticleDate): string {
+  const date = new Date(item.publishedAt * 1000);
+  return item.publishedAtKind === 'date'
+    ? `${date.getUTCFullYear()}-${date.getUTCMonth()}-${date.getUTCDate()}`
+    : `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+export function articleDateTitle(item: ArticleDate): string {
+  return item.publishedAtKind === 'date'
+    ? new Intl.DateTimeFormat(currentLocale(), { dateStyle: 'medium', timeZone: 'UTC' }).format(
+        new Date(item.publishedAt * 1000),
+      )
+    : formatDateTime(item.publishedAt);
+}
+
+export function articleDateLabel(item: ArticleDate, nowSecs = Date.now() / 1000): string {
+  if (item.publishedAtKind === 'date') return articleDateTitle(item);
+  const date = formatRelative(item.publishedAt, nowSecs);
+  return item.publishedAtKind === 'discovered' ? t('posts.discoveredAt', { date }) : date;
 }

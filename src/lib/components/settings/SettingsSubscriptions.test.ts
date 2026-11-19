@@ -35,6 +35,8 @@ function feed(id: number, title: string, overrides: Partial<FeedSummary> = {}): 
     hiddenFromAll: false,
     language: null,
     customTitle: null,
+    sortOrder: 0,
+    pinned: false,
     ...overrides,
   };
 }
@@ -128,6 +130,25 @@ describe('SettingsSubscriptions', () => {
     await fireEvent.input(name, { target: { value: 'Design' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     expect(api.createFeedFolder).toHaveBeenCalledWith('Design');
+  });
+
+  it('offers a retry for an unexpected rename failure, unlike a name clash', async () => {
+    renderList();
+    api.renameFeedFolder.mockRejectedValueOnce(new Error('disk full'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Rename Tech' }));
+    await fireEvent.input(screen.getByLabelText('Folder name'), {
+      target: { value: 'Engineering' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('disk full');
+    const retry = within(alert as HTMLElement).getByRole('button', { name: 'Retry' });
+
+    api.renameFeedFolder.mockResolvedValueOnce(undefined);
+    await fireEvent.click(retry);
+    expect(api.renameFeedFolder).toHaveBeenCalledTimes(2);
+    expect(api.renameFeedFolder).toHaveBeenLastCalledWith(1, 'Engineering');
   });
 
   it('renames a folder and deletes one only after confirming', async () => {

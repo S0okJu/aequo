@@ -3,6 +3,7 @@
 // no Tauri IPC here; callers (FeedContent/PostReader) own persistence.
 
 import DiffMatchPatch from 'diff-match-patch';
+import { t, type MessageKey } from './i18n/index.svelte';
 import type { Annotation } from './types';
 
 const OVERLAY_ATTRIBUTE = 'data-aequo-overlay';
@@ -161,6 +162,22 @@ export interface ApplyOverlayOptions {
   fallbackColor?: string;
 }
 
+const MEMO_PREVIEW_LENGTH = 60;
+
+/** Accessible name for an overlay mark - names its kind, color (highlight)
+ * or a note preview (memo) so a keyboard/screen-reader user can tell what's
+ * there without first opening it (docs/UNIFIED_UX_MOTION_PLAN.md §7.5 A2). */
+function accessibleName(annotation: Annotation, fallbackColor: string): string {
+  if (annotation.kind === 'highlight') {
+    const color = annotation.color ?? fallbackColor;
+    return t('annotation.mark.highlight', { color: t(`color.${color}` as MessageKey) });
+  }
+  const note = annotation.note ?? '';
+  const preview =
+    note.length > MEMO_PREVIEW_LENGTH ? `${note.slice(0, MEMO_PREVIEW_LENGTH)}…` : note;
+  return t('annotation.mark.memo', { note: preview });
+}
+
 /** Renders `annotations` as `<mark>`/`<span>` overlays over `root`'s text.
  * Idempotent - always clears any previous overlay first, so it's safe to
  * call again whenever `annotations` changes without `content` changing. */
@@ -180,6 +197,13 @@ export function applyOverlay(
       wrapper.setAttribute(OVERLAY_ATTRIBUTE, '');
       wrapper.setAttribute('data-annotation-id', String(annotation.id));
       wrapper.setAttribute('data-kind', annotation.kind);
+      // Keyboard/screen-reader access to an *existing* mark (opening a new
+      // one still needs a mouse/trackpad selection - docs/UNIFIED_UX_MOTION_PLAN.md
+      // §7.5, §11 scope note). The click handler already reads these same
+      // data-* attributes; Enter/Space on this element is wired alongside it.
+      wrapper.setAttribute('tabindex', '0');
+      wrapper.setAttribute('role', 'button');
+      wrapper.setAttribute('aria-label', accessibleName(annotation, fallbackColor));
       wrapper.className =
         annotation.kind === 'highlight'
           ? `aequo-hl aequo-hl-${annotation.color ?? fallbackColor}`

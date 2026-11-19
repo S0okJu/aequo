@@ -71,7 +71,7 @@
     background: var(--color-bg);
     box-shadow: var(--shadow-popover);
     pointer-events: auto;
-    animation: toast-in 160ms ease;
+    animation: toast-in var(--motion-base) ease;
   }
 
   .toast-icon {

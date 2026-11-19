@@ -1,16 +1,23 @@
 <script lang="ts">
+  import '$lib/styles/controls.css';
   import { onMount } from 'svelte';
   import { applyThemePreference, getThemePreference } from '$lib/theme';
   import ToastHost from '$lib/components/ToastHost.svelte';
   import { applyDocumentLanguage } from '$lib/i18n/index.svelte';
   import { startFeedIconSync } from '$lib/feedIcons.svelte';
+  import { startResourceSync } from '$lib/resources.svelte';
 
   let { children } = $props();
 
   onMount(() => {
     applyThemePreference(getThemePreference());
     applyDocumentLanguage();
-    startFeedIconSync();
+    const stopIcons = startFeedIconSync();
+    const stopResources = startResourceSync();
+    return () => {
+      stopResources();
+      stopIcons();
+    };
   });
 </script>
 
@@ -34,8 +41,9 @@
     --color-on-accent: #ffffff;
     --color-on-error: #ffffff;
     --color-success: #268257;
-    --color-selection-bg: #e5f1ff;
+    --color-selection-bg: #ededee;
     --color-hover-bg: #f0f0f1;
+    --color-segment-thumb: #ffffff;
     --color-error: #d1453b;
     --code-keyword: #7c3aed;
     --code-string: #16803c;
@@ -52,6 +60,13 @@
     --hl-pink: rgba(255, 90, 165, 0.3);
     --hl-purple: rgba(150, 90, 255, 0.3);
 
+    /* Loading placeholder behind a body image with no width/height
+       (docs/UNIFIED_UX_MOTION_PLAN.md §7.5 D5) - most web images are
+       light-background screenshots/diagrams, so a light neutral plate
+       previews closer to the real thing than the app's own surface color.
+       Same value in light mode; dark mode overrides it below. */
+    --color-image-plate: var(--color-bg-secondary);
+
     /* Shared shape/motion scale so every component picks from the same
        steps instead of inventing its own px value. */
     --radius-xs: 4px;
@@ -60,9 +75,30 @@
     --radius-lg: 10px;
     --radius-xl: 12px;
     --radius-pill: 999px;
-    --transition: 120ms ease;
-    --transition-layout: 220ms cubic-bezier(0.4, 0, 0.2, 1);
-    --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.18);
+    --control-size: 32px;
+    --control-size-xs: 24px;
+    --control-size-lg: 36px;
+    --control-radius: var(--radius-sm);
+    --surface-radius: var(--radius-md);
+
+    /* Motion scale (docs/UNIFIED_UX_MOTION_PLAN.md §3.1) - three durations,
+       two easings, one rise distance. `--transition`/`--transition-layout`
+       are kept as the names every component already uses; they now just
+       point at these so there's one place to change the actual numbers.
+       `pnpm check` enforces var(--motion-*) usage via scripts/check-motion.sh. */
+    --motion-context-highlight: 600ms;
+    --motion-fast: 120ms;
+    --motion-base: 180ms;
+    --motion-layout: 220ms;
+    --motion-emphasis: 1200ms;
+    --motion-loop: 800ms;
+    --motion-loop-slow: 1200ms;
+    --ease-move: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-enter: cubic-bezier(0.2, 0, 0, 1);
+    --motion-rise: 6px;
+    --transition: var(--motion-fast) var(--ease-move);
+    --transition-layout: var(--motion-layout) var(--ease-move);
+    --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.12);
 
     /* Spacing scale (UX polish pass) - one shared rhythm for new/touched
        code instead of another one-off px value per component. */
@@ -84,6 +120,14 @@
     --text-heading: 17px;
     --text-display: 22px;
     --text-reading: 16px;
+    /* Body-content heading levels (docs/UNIFIED_UX_MOTION_PLAN.md §7.2 R3) -
+       separate from the UI's own --text-title/--text-heading/--text-display
+       so a feed's own <h1>-<h3> can never render larger than the article
+       title (--text-display) above it. Weight carries the h4 step instead
+       of a fifth size. */
+    --text-reading-h1: 20px;
+    --text-reading-h2: 18px;
+    --text-reading-h3: 16px;
     --weight-regular: 400;
     --weight-medium: 550;
     --weight-bold: 650;
@@ -96,6 +140,7 @@
   }
 
   :global(:root[data-theme='dark']) {
+    --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.24);
     color-scheme: dark;
     --color-bg: #2a2d34;
     --color-bg-secondary: #212328;
@@ -108,19 +153,28 @@
     --color-on-accent: #182535;
     --color-on-error: #321b19;
     --color-success: #85cf97;
-    --color-selection-bg: #2b3c52;
+    --color-selection-bg: #3c4048;
     --color-hover-bg: #2f323a;
+    --color-segment-thumb: #454a55;
     --color-error: #e8827a;
     --code-keyword: #b89cf0;
     --code-string: #85cf97;
     --code-number: #e8b06d;
     --code-comment: #8f8f96;
     --code-function: #80b5e8;
-    --hl-yellow: rgba(255, 212, 0, 0.22);
-    --hl-green: rgba(52, 199, 89, 0.22);
-    --hl-blue: rgba(10, 124, 255, 0.22);
-    --hl-pink: rgba(255, 90, 165, 0.22);
-    --hl-purple: rgba(150, 90, 255, 0.22);
+    /* All five colors had converged to the same 0.22 alpha, which both cut
+       their contrast margin close and made them hard to tell apart from
+       each other and from --color-selection-bg/--color-accent (both blue-
+       leaning) - re-tuned per color, verified by script against
+       --color-text (docs/UNIFIED_UX_MOTION_PLAN.md §7.4 D2/D4). Hue/alpha
+       only; the palette is still 5 colors with the same names, so stored
+       `color` values on existing annotations don't change meaning. */
+    --hl-yellow: rgba(255, 212, 0, 0.3);
+    --hl-green: rgba(52, 199, 89, 0.28);
+    --hl-blue: rgba(70, 165, 255, 0.26);
+    --hl-pink: rgba(255, 60, 140, 0.3);
+    --hl-purple: rgba(175, 100, 255, 0.3);
+    --color-image-plate: #e3e3e5;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -137,8 +191,10 @@
       --color-on-accent: #182535;
       --color-on-error: #321b19;
       --color-success: #85cf97;
-      --color-selection-bg: #2b3c52;
+      --color-selection-bg: #3c4048;
       --color-hover-bg: #2f323a;
+      --color-segment-thumb: #454a55;
+      --color-segment-thumb: #454a55;
       --color-error: #e8827a;
       --code-keyword: #b89cf0;
       --code-string: #85cf97;
@@ -146,13 +202,14 @@
       --code-comment: #8f8f96;
       --code-function: #80b5e8;
 
-      /* Lower opacity + desaturated against --color-bg: #22252b so the
-         highlights stay legible instead of glowing. */
-      --hl-yellow: rgba(255, 212, 0, 0.22);
-      --hl-green: rgba(52, 199, 89, 0.22);
-      --hl-blue: rgba(10, 124, 255, 0.22);
-      --hl-pink: rgba(255, 90, 165, 0.22);
-      --hl-purple: rgba(150, 90, 255, 0.22);
+      /* Kept identical to the explicit :root[data-theme='dark'] block above -
+         see its comment (docs/UNIFIED_UX_MOTION_PLAN.md §7.4 D2/D4). */
+      --hl-yellow: rgba(255, 212, 0, 0.3);
+      --hl-green: rgba(52, 199, 89, 0.28);
+      --hl-blue: rgba(70, 165, 255, 0.26);
+      --hl-pink: rgba(255, 60, 140, 0.3);
+      --hl-purple: rgba(175, 100, 255, 0.3);
+      --color-image-plate: #e3e3e5;
     }
   }
 
@@ -197,6 +254,41 @@
     outline-offset: 2px;
   }
 
+  /* Choices with many or dynamic options stay a native <select>, drawn to
+     match SegmentedControl's height and corners. */
+  :global(select) {
+    min-height: var(--control-size);
+    padding: var(--space-1) 28px var(--space-1) var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-bg);
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--color-text-secondary) 50%),
+      linear-gradient(135deg, var(--color-text-secondary) 50%, transparent 50%);
+    background-position:
+      calc(100% - 15px) 50%,
+      calc(100% - 11px) 50%;
+    background-repeat: no-repeat;
+    background-size: 4px 4px;
+    color: var(--color-text);
+    font: inherit;
+    font-size: var(--text-body);
+    appearance: none;
+    cursor: pointer;
+    transition:
+      border-color var(--transition),
+      background-color var(--transition);
+  }
+
+  :global(select:hover:not(:disabled)) {
+    border-color: var(--color-text-tertiary);
+  }
+
+  :global(select:disabled) {
+    opacity: 0.5;
+    cursor: default;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     :global(*),
     :global(*::before),
@@ -204,6 +296,40 @@
       transition: none !important;
       animation: none !important;
       scroll-behavior: auto !important;
+    }
+  }
+
+  /* One rotation keyframe, shared by every spinner/spinning-icon in the app
+     (docs/UNIFIED_UX_MOTION_PLAN.md §4 "대기는 Spinner.svelte 하나만").
+     `-global-` keeps Svelte from mangling the name, so Spinner.svelte and
+     IconButton.svelte can both reference `animation: spin ...` without
+     redefining the keyframe themselves - scripts/check-motion.sh fails the
+     build if any other file declares its own copy of it. */
+  @keyframes -global-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* One "something just appeared in place" fade, shared by every inline
+     status/confirmation message (SettingsRow, SettingsAi, SettingsStorage)
+     instead of each defining its own near-identical keyframe
+     (docs/UNIFIED_UX_MOTION_PLAN.md §5.5 결정 1, K3). Fade only - the content
+     changes in place, so nothing needs to move to explain it (§4 "내용 교체"). */
+  @keyframes -global-fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  /* An inline search/filter pill rising into place - shared by PostsFeed's
+     post search and the sidebar's feed filter (docs/
+     PANEL_DESIGN_UNIFICATION_PLAN.md §5 step 4) instead of each defining its
+     own copy of the same keyframe. */
+  @keyframes -global-search-in {
+    from {
+      opacity: 0;
+      transform: translateY(var(--motion-rise));
     }
   }
 
@@ -296,7 +422,7 @@
   }
 
   :global(.confirm-remove:disabled) {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: default;
   }
 
@@ -357,6 +483,11 @@
     font: inherit;
     font-size: var(--text-small);
     cursor: pointer;
+  }
+
+  :global(.error-card button:disabled) {
+    opacity: 0.5;
+    cursor: default;
   }
 
   :global(.error-card .dismiss-error) {

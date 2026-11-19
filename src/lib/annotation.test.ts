@@ -119,6 +119,42 @@ describe('applyOverlay / removeOverlay', () => {
     expect(extractPlainText(root)).toBe('hello world');
   });
 
+  it('makes an existing highlight keyboard/screen-reader accessible', () => {
+    const root = el('<p>hello world</p>');
+    applyOverlay(root, [
+      sampleAnnotation({ startOffset: 6, endOffset: 11, kind: 'highlight', color: 'pink' }),
+    ]);
+
+    const mark = root.querySelector('mark');
+    expect(mark?.getAttribute('tabindex')).toBe('0');
+    expect(mark?.getAttribute('role')).toBe('button');
+    expect(mark?.getAttribute('aria-label')).toBe('pink highlight');
+  });
+
+  it('names a memo mark with a preview of its note, truncated when long', () => {
+    const root = el('<p>hello world</p>');
+    applyOverlay(root, [
+      sampleAnnotation({ kind: 'memo', color: null, note: 'short note', startOffset: 0, endOffset: 5 }),
+    ]);
+    const short = root.querySelector('span[data-kind="memo"]');
+    expect(short?.getAttribute('tabindex')).toBe('0');
+    expect(short?.getAttribute('role')).toBe('button');
+    expect(short?.getAttribute('aria-label')).toBe('Memo: short note');
+
+    const longRoot = el('<p>hello world</p>');
+    applyOverlay(longRoot, [
+      sampleAnnotation({
+        kind: 'memo',
+        color: null,
+        note: 'x'.repeat(100),
+        startOffset: 0,
+        endOffset: 5,
+      }),
+    ]);
+    const longLabel = longRoot.querySelector('span[data-kind="memo"]')?.getAttribute('aria-label');
+    expect(longLabel).toBe(`Memo: ${'x'.repeat(60)}…`);
+  });
+
   it('nests a highlight and a memo sharing the identical range without corrupting the text', () => {
     const root = el('<p>hello world</p>');
     applyOverlay(root, [

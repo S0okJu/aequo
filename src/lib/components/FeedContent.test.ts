@@ -81,6 +81,37 @@ describe('FeedContent', () => {
     expect(container.textContent).toContain('bad link');
   });
 
+  it('wraps a table in a scrolling container while keeping the table itself a real table', () => {
+    const { container } = render(FeedContent, {
+      props: {
+        content: '<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>',
+        baseUrl: 'https://feed.example/',
+      },
+    });
+    const wrap = container.querySelector('.table-wrap');
+    expect(wrap).not.toBeNull();
+    const table = wrap?.querySelector('table');
+    expect(table).not.toBeNull();
+    expect(table?.parentElement).toBe(wrap);
+    expect(table?.querySelectorAll('th')).toHaveLength(2);
+    expect(table?.querySelectorAll('td')).toHaveLength(2);
+  });
+
+  it('tags a width-less image as loading, then clears it once the image resolves', async () => {
+    const { container } = render(FeedContent, {
+      props: {
+        content: '<img src="https://feed.example/photo.jpg" alt="">',
+        baseUrl: 'https://feed.example/',
+      },
+    });
+    const img = container.querySelector('img') as HTMLImageElement;
+    expect(img.hasAttribute('data-ph')).toBe(true);
+
+    img.dispatchEvent(new Event('load'));
+    await flushMicrotasks();
+    expect(img.hasAttribute('data-ph')).toBe(false);
+  });
+
   it('does not introduce stray whitespace around the injected HTML (would silently shift every annotation offset)', () => {
     const { container } = render(FeedContent, {
       props: { content: '<p>hello world</p>', baseUrl: 'https://feed.example/' },
@@ -106,6 +137,29 @@ describe('FeedContent', () => {
     expect(mark).not.toBeNull();
     expect(mark?.textContent).toBe('hello');
     expect(mark?.className).toContain('aequo-hl-yellow');
+  });
+
+  it('opens the popover for an existing mark with Enter, not just a click', async () => {
+    const { container, findByRole } = render(FeedContent, {
+      props: {
+        content: '<p>hello world</p>',
+        baseUrl: 'https://feed.example/',
+        annotations: [
+          sampleAnnotation({ contentHash: await annotationModule.hashPlainText('hello world') }),
+        ],
+      },
+    });
+    await flushMicrotasks();
+
+    await vi.waitFor(() =>
+      expect(container.querySelector('mark[data-annotation-id="1"]')).not.toBeNull(),
+    );
+    const mark = container.querySelector('mark[data-annotation-id="1"]') as HTMLElement;
+    expect(mark.getAttribute('tabindex')).toBe('0');
+    expect(mark.getAttribute('role')).toBe('button');
+
+    await fireEvent.keyDown(mark, { key: 'Enter' });
+    expect(await findByRole('dialog')).not.toBeNull();
   });
 
   it('calls onReanchored when the stored hash is stale but the quote is still found', async () => {
@@ -245,11 +299,71 @@ describe('FeedContent', () => {
     saveButton.click();
     await flushMicrotasks();
 
-    expect(onCreateAnnotation).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(onCreateAnnotation).toHaveBeenCalledTimes(1));
     expect(onCreateAnnotation.mock.calls[0][0]).toMatchObject({
       kind: 'memo',
       note: 'remember this',
       quotedText: 'hello',
     });
+  });
+  it('does not persist a highlight whose hash finishes after the content is replaced', async () => {
+    const onCreateAnnotation = vi.fn();
+    const { container, rerender, getByRole } = render(FeedContent, {
+      props: {
+        content: '<p>hello world</p>',
+        baseUrl: 'https://feed.example/',
+        onCreateAnnotation,
+      },
+    });
+    await flushMicrotasks();
+    let finishHash: (hash: string) => void = () => {};
+    const hash = vi.spyOn(annotationModule, 'hashPlainText').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishHash = resolve;
+        }),
+    );
+    const contentDiv = container.querySelector('.content') as HTMLElement;
+    selectFirstTextNode(contentDiv, 0, 5);
+    await fireEvent.mouseUp(contentDiv);
+    await fireEvent.click(getByRole('button', { name: 'Highlight yellow' }));
+    expect(hash).toHaveBeenCalled();
+    await rerender({
+      content: '<p>different body</p>',
+      baseUrl: 'https://feed.example/',
+      onCreateAnnotation,
+    });
+    finishHash('old hash');
+    await flushMicrotasks();
+    expect(onCreateAnnotation).not.toHaveBeenCalled();
+    hash.mockRestore();
+  });
+
+  it('does not apply late overlay reconciliation or retain selection UI after unmount', async () => {
+    let finish: (
+      result: Awaited<ReturnType<typeof annotationModule.reconcileAnnotations>>,
+    ) => void = () => {};
+    const reconcile = vi.spyOn(annotationModule, 'reconcileAnnotations').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const overlay = vi.spyOn(annotationModule, 'applyOverlay');
+    const onOrphanedChange = vi.fn();
+    const { container, unmount } = render(FeedContent, {
+      props: { content: '<p>hello world</p>', baseUrl: 'https://feed.example/', onOrphanedChange },
+    });
+    await flushMicrotasks();
+    selectFirstTextNode(container.querySelector('.content') as HTMLElement, 0, 5);
+    expect(window.getSelection()?.toString()).toBe('hello');
+    unmount();
+    finish({ rendered: [], orphanedIds: [], toPersist: [] });
+    await flushMicrotasks();
+    expect(overlay).not.toHaveBeenCalled();
+    expect(onOrphanedChange).not.toHaveBeenCalled();
+    expect(window.getSelection()?.toString()).toBe('');
+    reconcile.mockRestore();
+    overlay.mockRestore();
   });
 });

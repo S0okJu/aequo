@@ -5,17 +5,73 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
 import {
   createAnnotation,
+  loadArticle,
+  cancelArticleRead,
   deleteAnnotation,
   listItemAnnotations,
   listItems,
+  loadAiTranscript,
   markItemsRead,
   markItemsUnread,
   markRead,
+  refreshFeedBatch,
   updateAnnotation,
 } from './api';
 
 describe('Tauri API wrappers', () => {
-  beforeEach(() => invoke.mockReset());
+  beforeEach(() => {
+    invoke.mockReset();
+  });
+
+  it('bounds manual batch IPC requests and continues after an individual failure', async () => {
+    let active = 0;
+    let peak = 0;
+    invoke.mockImplementation(async (_command: string, args: { feedId: number }) => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      active--;
+      if (args.feedId === 13) throw new Error('one failed feed');
+      return 'not modified';
+    });
+    await expect(refreshFeedBatch(Array.from({ length: 100 }, (_, i) => i + 1))).resolves.toEqual({
+      failed: 1,
+    });
+    expect(peak).toBeLessThanOrEqual(4);
+    expect(invoke).toHaveBeenCalledTimes(100);
+  });
+
+  it('passes the foreground article revision to load and cancellation commands', async () => {
+    await loadArticle(7, true, 123);
+    expect(invoke).toHaveBeenLastCalledWith('load_article', {
+      itemId: 7,
+      forceRefresh: true,
+      requestRevision: 123,
+    });
+    await cancelArticleRead(123);
+    expect(invoke).toHaveBeenLastCalledWith('cancel_article_read', { requestRevision: 123 });
+  });
+
+  it('passes one transcript cursor and defaults to the latest page', async () => {
+    await loadAiTranscript(7);
+    expect(invoke).toHaveBeenLastCalledWith('load_ai_transcript', {
+      sessionId: 7,
+      before: null,
+      after: null,
+    });
+    await loadAiTranscript(7, { before: 81 });
+    expect(invoke).toHaveBeenLastCalledWith('load_ai_transcript', {
+      sessionId: 7,
+      before: 81,
+      after: null,
+    });
+    await loadAiTranscript(7, { after: 20 });
+    expect(invoke).toHaveBeenLastCalledWith('load_ai_transcript', {
+      sessionId: 7,
+      before: null,
+      after: 20,
+    });
+  });
 
   it('forwards the view filter and paging to the list_items command', async () => {
     invoke.mockResolvedValue([]);
@@ -26,6 +82,7 @@ describe('Tauri API wrappers', () => {
       limit: 50,
       cursorPublishedAt: 1_700_000_000,
       cursorId: 100,
+      newer: false,
     });
   });
 
@@ -38,6 +95,7 @@ describe('Tauri API wrappers', () => {
       limit: 50,
       cursorPublishedAt: null,
       cursorId: null,
+      newer: false,
     });
   });
 

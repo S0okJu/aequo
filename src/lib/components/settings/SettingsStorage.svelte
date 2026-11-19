@@ -1,12 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import SegmentedControl from '../SegmentedControl.svelte';
+  import SettingsGroup from './SettingsGroup.svelte';
+  import SettingsGrid from './SettingsGrid.svelte';
   import SettingsRow from './SettingsRow.svelte';
+  import StatePlaceholder from '../StatePlaceholder.svelte';
   import {
     getRetentionSettings,
     previewRetentionCleanup,
     runRetentionCleanup,
     setRetentionSettings,
   } from '$lib/api';
+  import { delayed } from '$lib/pending.svelte';
   import { showToast } from '$lib/toast.svelte.ts';
   import { t } from '$lib/i18n/index.svelte';
   import type { CleanupPreview, RetentionSettings } from '$lib/types';
@@ -23,39 +28,62 @@
   let status = $state<{ field: keyof RetentionSettings; text: string; error: boolean } | null>(
     null,
   );
+  let statusKey = $state(0);
   let confirming = $state(false);
   let cleaning = $state(false);
+  let saving = $state(false);
+  let loading = $state(true);
   let loadError = $state<string | null>(null);
-  // Changes save immediately; a later change supersedes an in-flight save.
-  let saveGeneration = 0;
+  // Lock policy and cleanup controls until the saved policy has a matching preview.
+  const showLoading = delayed(() => loading);
 
-  onMount(async () => {
+  async function load() {
+    loading = true;
+    loadError = null;
+    status = null;
     try {
       [retention, preview] = await Promise.all([getRetentionSettings(), previewRetentionCleanup()]);
     } catch (error) {
       loadError = String(error);
+    } finally {
+      loading = false;
     }
-  });
+  }
+
+  onMount(load);
 
   async function update(field: keyof RetentionSettings, days: number) {
-    if (!retention) return;
+    if (!retention || saving || cleaning) return;
+    saving = true;
+    confirming = false;
     const previous = retention[field];
     retention = { ...retention, [field]: days };
-    const generation = ++saveGeneration;
+    let persisted = false;
     try {
       await setRetentionSettings(retention);
+      persisted = true;
+      preview = null;
       const nextPreview = await previewRetentionCleanup();
-      if (generation !== saveGeneration) return;
       preview = nextPreview;
       status = { field, text: t('settings.saved'), error: false };
+      statusKey++;
     } catch (error) {
-      if (generation !== saveGeneration) return;
-      retention = { ...retention, [field]: previous };
-      status = { field, text: t('settings.saveFailed', { error: String(error) }), error: true };
+      if (!persisted) retention = { ...retention, [field]: previous };
+      status = {
+        field,
+        text: t(persisted ? 'settings.storage.previewFailed' : 'settings.saveFailed', {
+          error: String(error),
+        }),
+        error: true,
+      };
+      statusKey++;
+    } finally {
+      saving = false;
     }
   }
 
   async function cleanNow() {
+    if (saving || cleaning || nothingToClean) return;
     cleaning = true;
     try {
       const result = await runRetentionCleanup();
@@ -71,7 +99,7 @@
       );
       onCleaned?.();
     } catch (error) {
-      showToast(String(error), { type: 'error' });
+      showToast(t('settings.storage.cleanFailed', { error: String(error) }), { type: 'error' });
     } finally {
       cleaning = false;
     }
@@ -92,130 +120,144 @@
   );
 </script>
 
-{#if loadError}
-  <p class="load-error" role="alert">{t('settings.loadError', { error: loadError })}</p>
+{#if showLoading.value}
+  <StatePlaceholder kind="loading" />
+{:else if loadError}
+  <StatePlaceholder kind="error" title={t('state.error.loadFailed.title')} body={loadError}>
+    {#snippet action()}
+      <button type="button" class="secondary ui-action ui-action--secondary" onclick={load}>
+        {t('state.error.loadFailed.action')}
+      </button>
+    {/snippet}
+  </StatePlaceholder>
 {:else if retention}
-  <SettingsRow
-    label={t('settings.storage.read')}
-    for="retention-read"
-    hint={t('settings.storage.readHint')}
-    status={status?.field === 'readRetentionDays' ? status.text : null}
-    statusTone={status?.error ? 'error' : 'neutral'}
-  >
-    <select
-      id="retention-read"
-      value={retention.readRetentionDays}
-      onchange={(event) => update('readRetentionDays', Number(event.currentTarget.value))}
-    >
-      {#each [0, 90, 180, 365] as days (days)}
-        <option value={days}>{daysLabel(days)}</option>
-      {/each}
-    </select>
-  </SettingsRow>
-
-  <SettingsRow
-    label={t('settings.storage.fullText')}
-    for="retention-full-text"
-    hint={t('settings.storage.fullTextHint')}
-    status={status?.field === 'fullTextRetentionDays' ? status.text : null}
-    statusTone={status?.error ? 'error' : 'neutral'}
-  >
-    <select
-      id="retention-full-text"
-      value={retention.fullTextRetentionDays}
-      onchange={(event) => update('fullTextRetentionDays', Number(event.currentTarget.value))}
-    >
-      {#each [0, 30, 90, 180, 365] as days (days)}
-        <option value={days}>{daysLabel(days)}</option>
-      {/each}
-    </select>
-  </SettingsRow>
-
-  <p class="note">{t('settings.storage.note')}</p>
-
-  <div class="cleanup">
-    {#if preview}
-      <p class="preview">
-        {t('settings.storage.preview', {
-          posts: preview.articlesToRemove,
-          texts: preview.fullTextsToClear,
-          size: formatBytes(preview.estimatedBytesToFree),
-        })}
-      </p>
-    {/if}
-    {#if confirming && preview}
-      <div class="confirm-row">
-        <span
-          >{t('settings.storage.cleanConfirm', {
-            posts: preview.articlesToRemove,
-            texts: preview.fullTextsToClear,
-          })}</span
-        >
-        <div class="confirm-actions">
-          <button type="button" onclick={() => (confirming = false)}>{t('common.cancel')}</button>
-          <button type="button" class="confirm-remove" disabled={cleaning} onclick={cleanNow}>
-            {cleaning ? t('settings.storage.cleaning') : t('settings.storage.cleanNow')}
-          </button>
-        </div>
-      </div>
-    {:else}
-      <button
-        type="button"
-        class="secondary"
-        disabled={nothingToClean}
-        onclick={() => (confirming = true)}>{t('settings.storage.cleanNow')}</button
+  {@const current = retention}
+  <SettingsGrid>
+    <SettingsGroup title={t('settings.group.retention')}>
+      {#snippet action()}
+        <span class="saving" role="status">{saving ? t('settings.saving') : ''}</span>
+      {/snippet}
+      <SettingsRow
+        label={t('settings.storage.read')}
+        labelId="retention-read"
+        hint={t('settings.storage.readHint')}
+        status={status?.field === 'readRetentionDays' ? status.text : null}
+        statusTone={status?.error ? 'error' : 'neutral'}
+        {statusKey}
       >
-    {/if}
-  </div>
+        <SegmentedControl
+          size="sm"
+          block
+          disabled={saving || cleaning}
+          labelledby="retention-read"
+          value={current.readRetentionDays}
+          onChange={(days) => update('readRetentionDays', days)}
+          options={[0, 90, 180, 365].map((days) => ({ value: days, label: daysLabel(days) }))}
+        />
+      </SettingsRow>
+
+      <SettingsRow
+        label={t('settings.storage.fullText')}
+        labelId="retention-full-text"
+        hint={t('settings.storage.fullTextHint')}
+        status={status?.field === 'fullTextRetentionDays' ? status.text : null}
+        statusTone={status?.error ? 'error' : 'neutral'}
+        {statusKey}
+      >
+        <SegmentedControl
+          size="sm"
+          block
+          disabled={saving || cleaning}
+          labelledby="retention-full-text"
+          value={current.fullTextRetentionDays}
+          onChange={(days) => update('fullTextRetentionDays', days)}
+          options={[0, 30, 90, 180, 365].map((days) => ({ value: days, label: daysLabel(days) }))}
+        />
+      </SettingsRow>
+    </SettingsGroup>
+
+    <SettingsGroup title={t('settings.group.cleanup')} tone="danger">
+      <SettingsRow
+        label={t('settings.storage.note')}
+        hint={preview
+          ? t('settings.storage.preview', {
+              posts: preview.articlesToRemove,
+              texts: preview.fullTextsToClear,
+              size: formatBytes(preview.estimatedBytesToFree),
+            })
+          : undefined}
+      >
+        {#if !preview && !saving}
+          <button type="button" class="ui-action ui-action--secondary" onclick={load}>
+            {t('state.error.loadFailed.action')}
+          </button>
+        {/if}
+        {#if !confirming || !preview}
+          <button
+            type="button"
+            class="secondary ui-action ui-action--secondary"
+            disabled={nothingToClean || saving || cleaning}
+            onclick={() => (confirming = true)}>{t('settings.storage.cleanNow')}</button
+          >
+        {/if}
+      </SettingsRow>
+      {#if confirming && preview}
+        <div class="confirm-row" role="group" aria-label={t('settings.storage.cleanNow')}>
+          <span
+            >{t('settings.storage.cleanConfirm', {
+              posts: preview.articlesToRemove,
+              texts: preview.fullTextsToClear,
+            })}</span
+          >
+          <div class="confirm-actions">
+            <button
+              type="button"
+              class="ui-action ui-action--secondary"
+              disabled={cleaning}
+              onclick={() => (confirming = false)}>{t('common.cancel')}</button
+            >
+            <button
+              type="button"
+              class="confirm-remove ui-action ui-action--secondary"
+              disabled={cleaning}
+              onclick={cleanNow}
+            >
+              {cleaning ? t('settings.storage.cleaning') : t('settings.storage.cleanNow')}
+            </button>
+          </div>
+        </div>
+      {/if}
+    </SettingsGroup>
+  </SettingsGrid>
 {/if}
 
 <style>
-  .note {
-    margin: var(--space-4) 0 0;
-    color: var(--color-text-secondary);
-    font-size: var(--text-small);
+  .confirm-row {
+    margin-bottom: var(--space-4);
+    /* Shared fade-in keyframe (+layout.svelte) - see SettingsRow.svelte. */
+    animation: fade-in var(--motion-fast) var(--ease-enter) both;
   }
-
-  .cleanup {
+  .confirm-row {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-2);
-    margin-top: var(--space-5);
-  }
-
-  .preview {
-    margin: 0;
-    color: var(--color-text-secondary);
-    font-size: var(--text-small);
-  }
-
-  .cleanup .confirm-row {
-    align-self: stretch;
-  }
-
-  .secondary {
-    padding: 6px var(--space-3);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: var(--color-bg);
+    gap: var(--space-3);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--color-border);
     color: var(--color-text);
-    font: inherit;
     font-size: var(--text-body);
-    cursor: pointer;
   }
-
-  .secondary:hover:not(:disabled) {
-    background: var(--color-hover-bg);
+  .confirm-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-2);
   }
-
-  .secondary:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-
-  .load-error {
+  .confirm-remove {
     color: var(--color-error);
+    border-color: color-mix(in srgb, var(--color-error) 35%, var(--color-border));
+  }
+  .saving {
+    color: var(--color-text-secondary);
     font-size: var(--text-small);
   }
 </style>

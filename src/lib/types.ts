@@ -20,6 +20,31 @@ export interface FeedSummary {
   language: string | null;
   /** The user's display name for the feed, if they set one. */
   customTitle: string | null;
+  /** Position within its folder (or the unfiled group), lowest first. */
+  sortOrder: number;
+  /** Shown in a "Pinned" section above the folder list. */
+  pinned: boolean;
+}
+
+export type ResourceMode = 'light' | 'balanced' | 'fast' | 'custom';
+
+export interface ResourceSettings {
+  schemaVersion: number;
+  mode: ResourceMode;
+  feedConcurrency: number;
+  prefetchFullText: boolean;
+  articleConcurrency: number;
+  minAutoRefreshSecs: number;
+  pauseOptionalWhenHidden: boolean;
+  retainedPages: number;
+  cacheBudgetMib: number;
+  aiFlushIntervalMs: number;
+}
+
+export interface ResourceStatus {
+  snapshot: { revision: number; settings: ResourceSettings };
+  recoveryError: string | null;
+  runningWork: number;
 }
 
 export interface FeedFolder {
@@ -35,9 +60,11 @@ export interface Item {
   guidHash: string;
   title: string | null;
   link: string | null;
-  summary: string | null;
-  fullContent: string | null;
+  /** Plain text, capped at 500 characters; original HTML stays in the DB. */
+  preview: string | null;
   publishedAt: number;
+  /** Date precision for HTML listings; absent in older IPC/cache data. */
+  publishedAtKind?: 'timestamp' | 'date' | 'discovered';
   fetchedAt: number;
   isRead: boolean;
   readAt: number | null;
@@ -82,9 +109,29 @@ export interface CleanupResult {
 
 export type AiProvider = 'codex' | 'claude';
 
+export interface AiContextItem {
+  itemId: number | null;
+  itemTitle: string | null;
+  feedId: number | null;
+  publishedAt?: number | null;
+  position: number;
+}
+
+export interface AiContextRequest {
+  key: number;
+  items: Item[];
+  scopeLabel?: string | null;
+  scopeFilter?: ItemFilter | null;
+  add?: boolean;
+  action?: 'summarize';
+}
+
 export interface AiSession {
   id: number;
-  itemId: number;
+  /** Legacy fixtures only; current context is always contextItems. */
+  itemId?: number | null;
+  contextItems?: AiContextItem[];
+  scopeLabel?: string | null;
   provider: AiProvider;
   providerSessionId: string | null;
   title: string;
@@ -123,10 +170,15 @@ export interface AiStreamEvent {
   sessionId: number;
   kind: 'delta' | 'replace' | 'status' | 'done' | 'error' | 'cancelled';
   text: string;
+  /** Set only when `kind` is `error`: a coarse category the UI can show a
+   * friendlier message for. `null`/absent falls back to showing `text`. */
+  errorKind?: 'loginRequired' | 'rateLimit' | 'network' | 'unknown' | null;
 }
 
 export interface AiTranscript {
   available: boolean;
+  hasOlder: boolean;
+  hasNewer: boolean;
   messages: AiMessage[];
   note: string | null;
 }
@@ -154,7 +206,6 @@ export interface ArticleView {
   title: string | null;
   contentHtml: string | null;
   rssContentHtml: string | null;
-  textContent: string | null;
   fetchedAt: number | null;
   cached: boolean;
   error: string | null;

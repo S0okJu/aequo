@@ -21,7 +21,14 @@ pub struct DiscoveredFeed {
     pub bytes: Vec<u8>,
 }
 
-const CONVENTIONAL_PATHS: &[&str] = &["/feed", "/feed/", "/rss", "/rss.xml", "/atom.xml", "/index.xml"];
+const CONVENTIONAL_PATHS: &[&str] = &[
+    "/feed",
+    "/feed/",
+    "/rss",
+    "/rss.xml",
+    "/atom.xml",
+    "/index.xml",
+];
 
 const MAX_CANDIDATES: usize = 8;
 
@@ -95,7 +102,10 @@ fn extract_link_candidates(base: &Url, html: &str) -> Vec<Url> {
             .is_some_and(|t| {
                 matches!(
                     t.as_str(),
-                    "application/rss+xml" | "application/atom+xml" | "application/json" | "application/feed+json"
+                    "application/rss+xml"
+                        | "application/atom+xml"
+                        | "application/json"
+                        | "application/feed+json"
                 )
             });
         if !is_feed_type {
@@ -103,9 +113,10 @@ fn extract_link_candidates(base: &Url, html: &str) -> Vec<Url> {
         }
 
         if let Some(href) = href_re.captures(attrs).map(|c| c[1].to_string())
-            && let Ok(url) = base.join(&href) {
-                out.push(url);
-            }
+            && let Ok(url) = base.join(&href)
+        {
+            out.push(url);
+        }
     }
     out
 }
@@ -180,9 +191,7 @@ mod tests {
         let candidates = conventional_candidates(&base);
 
         assert!(candidates.contains(&Url::parse("https://example.com/feed").unwrap()));
-        assert!(!candidates
-            .iter()
-            .any(|u| u.as_str().contains("/blog/feed")));
+        assert!(!candidates.iter().any(|u| u.as_str().contains("/blog/feed")));
     }
 
     #[test]
@@ -202,7 +211,9 @@ mod tests {
 
     fn rss_with_items(count: usize) -> String {
         let items = (0..count)
-            .map(|i| format!("<item><title>Post {i}</title><link>https://example.com/{i}</link></item>"))
+            .map(|i| {
+                format!("<item><title>Post {i}</title><link>https://example.com/{i}</link></item>")
+            })
             .collect::<String>();
         format!(
             r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Example</title>{items}</channel></rss>"#

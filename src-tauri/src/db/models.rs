@@ -49,6 +49,10 @@ pub struct Feed {
     pub language: Option<String>,
     /// A display name the user chose; shown instead of `title` when set.
     pub custom_title: Option<String>,
+    /// Position within its folder (or the unfiled group), lowest first.
+    pub sort_order: i64,
+    /// Shown in a "Pinned" section above the folder list; §K.
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -71,6 +75,25 @@ pub struct Item {
     pub summary: Option<String>,
     pub full_content: Option<String>,
     pub published_at: i64,
+    pub published_at_kind: String,
+    pub fetched_at: i64,
+    pub is_read: bool,
+    pub read_at: Option<i64>,
+    pub is_saved: bool,
+}
+
+/// Timeline IPC projection. Original HTML is loaded only by the reader.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemSummary {
+    pub id: i64,
+    pub feed_id: i64,
+    pub guid_hash: String,
+    pub title: Option<String>,
+    pub link: Option<String>,
+    pub preview: Option<String>,
+    pub published_at: i64,
+    pub published_at_kind: String,
     pub fetched_at: i64,
     pub is_read: bool,
     pub read_at: Option<i64>,
@@ -110,6 +133,7 @@ pub struct NewItem {
     pub summary: Option<String>,
     pub full_content: Option<String>,
     pub published_at: i64,
+    pub published_at_kind: &'static str,
     pub fetched_at: i64,
 }
 
@@ -134,7 +158,8 @@ pub struct FeedMeta {
 #[serde(rename_all = "camelCase")]
 pub struct AiSession {
     pub id: i64,
-    pub item_id: i64,
+    pub scope_label: Option<String>,
+    pub context_items: Vec<AiContextItem>,
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub title: String,
@@ -170,4 +195,14 @@ pub struct ArticleCache {
     pub last_modified: Option<String>,
     pub fetched_at: i64,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiContextItem {
+    pub item_id: Option<i64>,
+    pub item_title: Option<String>,
+    pub feed_id: Option<i64>,
+    pub published_at: Option<i64>,
+    pub position: i64,
 }

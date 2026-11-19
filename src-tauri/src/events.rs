@@ -17,22 +17,27 @@ pub struct FeedUpdatedPayload {
     pub feed_id: i64,
     #[serde(rename = "newItemCount")]
     pub new_item_count: usize,
+    pub reconciled: bool,
 }
 
-/// Emits `feed-updated` iff `outcome` actually added new items - no
+/// Emits on inserted items or repaired website rows (including zero inserts). No
 /// event for a `304`, a failure, or a `200` where every item was
 /// already known (dedup found nothing new). Generic over the Tauri
 /// runtime so tests can pass a mock `AppHandle` (`tauri::test`)
 /// instead of the production `Wry` one.
 pub fn emit_if_updated<R: Runtime>(app: &AppHandle<R>, feed_id: i64, outcome: &PollOutcome) {
-    if let PollOutcome::Updated { new_item_count } = outcome
-        && *new_item_count > 0
-    {
+    let count = match outcome {
+        PollOutcome::Updated { new_item_count } if *new_item_count > 0 => Some(*new_item_count),
+        PollOutcome::Reconciled { new_item_count } => Some(*new_item_count),
+        _ => None,
+    };
+    if let Some(new_item_count) = count {
         let _ = app.emit(
             "feed-updated",
             FeedUpdatedPayload {
                 feed_id,
-                new_item_count: *new_item_count,
+                new_item_count,
+                reconciled: matches!(outcome, PollOutcome::Reconciled { .. }),
             },
         );
     }

@@ -1,0 +1,151 @@
+/* Shared controls and floating lists. Components retain only their layout rules. */
+.ui-action {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: var(--control-size);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-small);
+  line-height: 1.4;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ui-action:hover:not(:disabled) {
+  background: var(--color-hover-bg);
+  color: var(--color-text);
+}
+.ui-action--selected {
+  background: var(--color-selection-bg);
+  color: var(--color-text);
+}
+.ui-action--secondary {
+  border-color: var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+/* Solid-fill primary and error-colored danger variants, so bespoke
+   one-off buttons (e.g. AnnotationPopover's save/delete) can join the
+   shared vocabulary instead of defining their own. The explicit :hover
+   overrides are required: without them the base .ui-action:hover rule
+   below would win and strip the fill/color on hover. */
+.ui-action--primary {
+  background: var(--color-accent-solid);
+  color: var(--color-on-accent);
+}
+.ui-action--primary:hover:not(:disabled) {
+  background: var(--color-accent-solid);
+  color: var(--color-on-accent);
+}
+.ui-action--danger {
+  color: var(--color-error);
+}
+.ui-action--danger:hover:not(:disabled) {
+  background: var(--color-hover-bg);
+  color: var(--color-error);
+}
+.ui-action:disabled,
+.ui-option:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ui-popup {
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--surface-radius);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-popover);
+}
+.ui-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  border-radius: var(--control-radius);
+}
+.ui-option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-size);
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-small);
+  text-align: left;
+  cursor: pointer;
+}
+.ui-option:hover:not(:disabled) {
+  background: var(--color-hover-bg);
+}
+.ui-option[aria-selected='true'],
+.ui-list-row.ui-selected {
+  background: var(--color-selection-bg);
+}
+.ui-list-row.ui-selected .ui-option {
+  background: transparent;
+}
+
+/* Native checkbox semantics, with a shared switch surface for binary preferences. */
+.ui-switch {
+  appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 22px;
+  margin: 5px 0;
+  border: 1px solid var(--color-text-tertiary);
+  border-radius: var(--radius-pill);
+  background: var(--color-selection-bg);
+  cursor: pointer;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition);
+}
+.ui-switch::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-text-secondary);
+  transition:
+    transform var(--transition),
+    background-color var(--transition);
+}
+.ui-switch:checked {
+  border-color: var(--color-accent-solid);
+  background: var(--color-accent-solid);
+}
+.ui-switch:checked::before {
+  transform: translateX(14px);
+  background: var(--color-on-accent);
+}
+.ui-switch:hover:not(:disabled) {
+  border-color: var(--color-text);
+}
+.ui-switch:disabled,
+fieldset:disabled .ui-switch {
+  opacity: 0.5;
+  cursor: default;
+}
+@media (forced-colors: active) {
+  .ui-switch {
+    appearance: auto;
+  }
+  .ui-switch::before {
+    display: none;
+  }
+}

@@ -18,6 +18,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::db::NewItem;
+use crate::resource_policy::{ResourcePolicy, WorkKind};
 
 use super::article_fetch;
 
@@ -25,7 +26,14 @@ const MAX_ITEMS_PER_CYCLE: usize = 8;
 const ENRICH_CONCURRENCY: usize = 3;
 const ENRICH_TIMEOUT: Duration = Duration::from_secs(15);
 
-pub async fn enrich_missing_full_content(items: &mut [NewItem], has_content: &HashSet<String>) {
+pub async fn enrich_missing_full_content(
+    items: &mut [NewItem],
+    has_content: &HashSet<String>,
+    policy: &ResourcePolicy,
+) {
+    if !policy.settings().prefetch_full_text || !policy.optional_allowed() {
+        return;
+    }
     let mut candidates: Vec<usize> = items
         .iter()
         .enumerate()
@@ -47,7 +55,11 @@ pub async fn enrich_missing_full_content(items: &mut [NewItem], has_content: &Ha
             }
         }
         let link = items[idx].link.clone().unwrap();
+        let policy = policy.clone();
         set.spawn(async move {
+            let Some(_permit) = policy.acquire(WorkKind::Article, true).await else {
+                return (idx, Ok(Ok(None)));
+            };
             let result = tokio::time::timeout(ENRICH_TIMEOUT, fetch_one(&link)).await;
             (idx, result)
         });
@@ -93,6 +105,7 @@ mod tests {
 
     fn item(guid_hash: &str, link: Option<String>, published_at: i64) -> NewItem {
         NewItem {
+            published_at_kind: "timestamp",
             guid_hash: guid_hash.to_string(),
             title: Some("Title".to_string()),
             link,
@@ -124,9 +137,20 @@ mod tests {
             Some(format!("{}/post", mock_server.uri())),
             1_700_000_000,
         )];
-        enrich_missing_full_content(&mut items, &HashSet::new()).await;
+        enrich_missing_full_content(
+            &mut items,
+            &HashSet::new(),
+            &ResourcePolicy::with_prefetch_for_tests(),
+        )
+        .await;
 
-        assert!(items[0].full_content.as_ref().unwrap().contains("long enough paragraph"));
+        assert!(
+            items[0]
+                .full_content
+                .as_ref()
+                .unwrap()
+                .contains("long enough paragraph")
+        );
     }
 
     #[tokio::test]
@@ -147,7 +171,12 @@ mod tests {
         let mut has_content = HashSet::new();
         has_content.insert("guid-1".to_string());
 
-        enrich_missing_full_content(&mut items, &has_content).await;
+        enrich_missing_full_content(
+            &mut items,
+            &has_content,
+            &ResourcePolicy::with_prefetch_for_tests(),
+        )
+        .await;
 
         assert!(items[0].full_content.is_none());
     }
@@ -155,7 +184,12 @@ mod tests {
     #[tokio::test]
     async fn skips_items_without_a_link() {
         let mut items = vec![item("guid-1", None, 1_700_000_000)];
-        enrich_missing_full_content(&mut items, &HashSet::new()).await;
+        enrich_missing_full_content(
+            &mut items,
+            &HashSet::new(),
+            &ResourcePolicy::with_prefetch_for_tests(),
+        )
+        .await;
         assert!(items[0].full_content.is_none());
     }
 
@@ -173,7 +207,12 @@ mod tests {
             Some(format!("{}/missing", mock_server.uri())),
             1_700_000_000,
         )];
-        enrich_missing_full_content(&mut items, &HashSet::new()).await;
+        enrich_missing_full_content(
+            &mut items,
+            &HashSet::new(),
+            &ResourcePolicy::with_prefetch_for_tests(),
+        )
+        .await;
 
         assert!(items[0].full_content.is_none());
     }
@@ -196,13 +235,21 @@ mod tests {
             })
             .collect();
 
-        enrich_missing_full_content(&mut items, &HashSet::new()).await;
+        enrich_missing_full_content(
+            &mut items,
+            &HashSet::new(),
+            &ResourcePolicy::with_prefetch_for_tests(),
+        )
+        .await;
 
         let enriched_count = items.iter().filter(|i| i.full_content.is_some()).count();
         assert_eq!(enriched_count, MAX_ITEMS_PER_CYCLE);
         // The newest-published items (highest index) are the ones kept.
-        for i in 2..items.len() {
-            assert!(items[i].full_content.is_some(), "item {i} should have been enriched");
+        for (i, item) in items.iter().enumerate().skip(2) {
+            assert!(
+                item.full_content.is_some(),
+                "item {i} should have been enriched"
+            );
         }
         assert!(items[0].full_content.is_none());
         assert!(items[1].full_content.is_none());

@@ -1,0 +1,38 @@
+{
+  "light": {
+    "schemaVersion": 1,
+    "mode": "light",
+    "feedConcurrency": 1,
+    "prefetchFullText": false,
+    "articleConcurrency": 1,
+    "minAutoRefreshSecs": 1800,
+    "pauseOptionalWhenHidden": true,
+    "retainedPages": 2,
+    "cacheBudgetMib": 16,
+    "aiFlushIntervalMs": 100
+  },
+  "balanced": {
+    "schemaVersion": 1,
+    "mode": "balanced",
+    "feedConcurrency": 2,
+    "prefetchFullText": false,
+    "articleConcurrency": 2,
+    "minAutoRefreshSecs": 900,
+    "pauseOptionalWhenHidden": false,
+    "retainedPages": 3,
+    "cacheBudgetMib": 32,
+    "aiFlushIntervalMs": 50
+  },
+  "fast": {
+    "schemaVersion": 1,
+    "mode": "fast",
+    "feedConcurrency": 4,
+    "prefetchFullText": false,
+    "articleConcurrency": 3,
+    "minAutoRefreshSecs": 300,
+    "pauseOptionalWhenHidden": false,
+    "retainedPages": 5,
+    "cacheBudgetMib": 64,
+    "aiFlushIntervalMs": 33
+  }
+}

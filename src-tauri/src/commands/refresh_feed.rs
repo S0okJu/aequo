@@ -10,11 +10,13 @@ use tauri::{AppHandle, State};
 use crate::db;
 use crate::events::emit_if_updated;
 use crate::fetch::worker::{self, PollOutcome};
+use crate::resource_policy::ResourcePolicy;
 
 #[tauri::command]
 pub async fn refresh_feed(
     app: AppHandle,
     db_state: State<'_, Mutex<Connection>>,
+    policy: State<'_, ResourcePolicy>,
     feed_id: i64,
 ) -> Result<String, String> {
     let meta = {
@@ -26,11 +28,14 @@ pub async fn refresh_feed(
             .ok_or_else(|| format!("feed {feed_id} not found"))?
     };
 
-    let outcome = worker::poll_feed_locked(&db_state, &meta).await?;
+    let outcome = worker::poll_feed_locked(&db_state, &meta, &policy, true).await?;
     emit_if_updated(&app, feed_id, &outcome);
 
     match outcome {
-        PollOutcome::Updated { new_item_count } => Ok(format!("{new_item_count} new item(s)")),
+        PollOutcome::Deferred { until } => Err(format!("Feed retry is paused until {until}.")),
+        PollOutcome::Updated { new_item_count } | PollOutcome::Reconciled { new_item_count } => {
+            Ok(format!("{new_item_count} new item(s)"))
+        }
         PollOutcome::NotModified => Ok("not modified".to_string()),
         PollOutcome::Failed { error } => Err(error),
     }

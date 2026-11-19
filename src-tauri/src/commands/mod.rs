@@ -5,17 +5,19 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::db;
 
 pub mod add_feed;
 pub mod ai;
+mod ai_io;
 mod ai_stream;
 mod ai_transcript;
 pub mod annotations;
 pub mod article;
 pub mod refresh_feed;
+pub mod resources;
 pub mod storage;
 
 /// A feed plus its unread count (ARCHITECTURE.md §8: "피드별 안읽음
@@ -45,16 +47,20 @@ pub fn list_feeds(db_state: State<'_, Mutex<Connection>>) -> Result<Vec<FeedSumm
         .collect()
 }
 
-/// Every stored feed icon as a `data:` URI, keyed by feed id (§3.12).
+/// Small batches of requested icons; never transfer every subscription at once.
 #[tauri::command]
 pub fn get_feed_icons(
     db_state: State<'_, Mutex<Connection>>,
+    feed_ids: Vec<i64>,
 ) -> Result<std::collections::HashMap<i64, String>, String> {
+    if feed_ids.len() > 32 {
+        return Err("At most 32 feed icons may be requested at once".into());
+    }
     use base64::Engine;
     let conn = db_state
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
-    let icons = db::list_feed_icons(&conn).map_err(|e| e.to_string())?;
+    let icons = db::list_feed_icons(&conn, &feed_ids).map_err(|e| e.to_string())?;
     Ok(icons
         .into_iter()
         .map(|(feed_id, mime, data)| {
@@ -71,14 +77,37 @@ pub fn list_items(
     limit: i64,
     cursor_published_at: Option<i64>,
     cursor_id: Option<i64>,
-) -> Result<Vec<db::Item>, String> {
+    newer: Option<bool>,
+) -> Result<Vec<db::ItemSummary>, String> {
+    if !(1..=100).contains(&limit) {
+        return Err("Page size must be between 1 and 100".into());
+    }
+    if cursor_published_at.is_some() != cursor_id.is_some() {
+        return Err("Both cursor values are required".into());
+    }
     let conn = db_state
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
     let cursor = cursor_published_at
         .zip(cursor_id)
         .map(|(published_at, id)| db::ItemCursor { published_at, id });
-    db::list_items(&conn, &filter, limit, cursor).map_err(|e| e.to_string())
+    if newer.unwrap_or(false) {
+        let cursor = cursor.ok_or_else(|| "A cursor is required for a newer page".to_string())?;
+        db::list_newer_items(&conn, &filter, limit, cursor).map_err(|e| e.to_string())
+    } else {
+        db::list_items(&conn, &filter, limit, cursor).map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+pub fn get_item_summary(
+    db_state: State<'_, Mutex<Connection>>,
+    item_id: i64,
+) -> Result<Option<db::ItemSummary>, String> {
+    let conn = db_state
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    db::get_item_summary_by_id(&conn, item_id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -89,6 +118,17 @@ pub fn mark_read(db_state: State<'_, Mutex<Connection>>, item_id: i64) -> Result
     db::mark_read(&conn, item_id, now_unix()).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn count_unread_items(
+    db_state: State<'_, Mutex<Connection>>,
+    filter: db::ItemFilter,
+) -> Result<i64, String> {
+    let conn = db_state
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    db::count_unread_items(&conn, &filter).map_err(|error| error.to_string())
+}
+
 /// Renames a feed for display; an empty name restores the feed's own title.
 #[tauri::command]
 pub fn rename_feed(
@@ -96,7 +136,9 @@ pub fn rename_feed(
     feed_id: i64,
     title: Option<String>,
 ) -> Result<(), String> {
-    let title = title.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let title = title
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
     if title.as_ref().is_some_and(|t| t.chars().count() > 200) {
         return Err("name is too long".to_string());
     }
@@ -143,12 +185,20 @@ fn now_unix() -> i64 {
 }
 
 #[tauri::command]
-pub fn delete_feed(db_state: State<'_, Mutex<Connection>>, feed_id: i64) -> Result<(), String> {
+pub fn delete_feed(
+    app: AppHandle,
+    db_state: State<'_, Mutex<Connection>>,
+    feed_id: i64,
+) -> Result<(), String> {
     let conn = db_state
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
     let deleted = db::delete_feed(&conn, feed_id).map_err(|e| e.to_string())?;
     if deleted {
+        let _ = app.emit(
+            "feed-icon-updated",
+            crate::icons::FeedIconUpdatedPayload { feed_id },
+        );
         Ok(())
     } else {
         Err(format!("feed {feed_id} not found"))
@@ -228,6 +278,34 @@ pub fn update_feed_organization(
     if db::update_feed_organization(&conn, feed_id, folder_id, hidden_from_all)
         .map_err(|e| e.to_string())?
     {
+        Ok(())
+    } else {
+        Err(format!("feed {feed_id} not found"))
+    }
+}
+
+#[tauri::command]
+pub fn reorder_feeds_in_folder(
+    db_state: State<'_, Mutex<Connection>>,
+    folder_id: Option<i64>,
+    feed_ids: Vec<i64>,
+) -> Result<(), String> {
+    let conn = db_state
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    db::reorder_feeds_in_folder(&conn, folder_id, &feed_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_feed_pinned(
+    db_state: State<'_, Mutex<Connection>>,
+    feed_id: i64,
+    pinned: bool,
+) -> Result<(), String> {
+    let conn = db_state
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    if db::set_feed_pinned(&conn, feed_id, pinned).map_err(|e| e.to_string())? {
         Ok(())
     } else {
         Err(format!("feed {feed_id} not found"))

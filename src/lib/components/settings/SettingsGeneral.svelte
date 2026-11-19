@@ -1,4 +1,7 @@
 <script lang="ts">
+  import SegmentedControl from '../SegmentedControl.svelte';
+  import SettingsGroup from './SettingsGroup.svelte';
+  import SettingsGrid from './SettingsGrid.svelte';
   import SettingsRow from './SettingsRow.svelte';
   import { applyThemePreference, getThemePreference, type ThemePreference } from '$lib/theme';
   import {
@@ -10,36 +13,64 @@
 
   let themePreference = $state<ThemePreference>(getThemePreference());
 
+  let changed = $state<'theme' | 'language' | null>(null);
+  let statusKey = $state(0);
+
+  function updateLanguage(preference: LocalePreference) {
+    setLocalePreference(preference);
+    changed = 'language';
+    statusKey++;
+  }
+
   function updateTheme(preference: ThemePreference) {
     themePreference = preference;
     applyThemePreference(preference);
+    changed = 'theme';
+    statusKey++;
   }
 </script>
 
-<SettingsRow label={t('settings.theme')} for="setting-theme" hint={t('settings.themeHint')}>
-  <select
-    id="setting-theme"
-    value={themePreference}
-    onchange={(event) => updateTheme(event.currentTarget.value as ThemePreference)}
-  >
-    <option value="system">{t('settings.theme.system')}</option>
-    <option value="light">{t('settings.theme.light')}</option>
-    <option value="dark">{t('settings.theme.dark')}</option>
-  </select>
-</SettingsRow>
-
-<SettingsRow
-  label={t('settings.language')}
-  for="setting-language"
-  hint={t('settings.languageHint')}
->
-  <select
-    id="setting-language"
-    value={getLocalePreference()}
-    onchange={(event) => setLocalePreference(event.currentTarget.value as LocalePreference)}
-  >
-    <option value="system">{t('settings.language.system')}</option>
-    <option value="en">{t('settings.language.en')}</option>
-    <option value="ko">{t('settings.language.ko')}</option>
-  </select>
-</SettingsRow>
+<SettingsGrid>
+  <SettingsGroup title={t('settings.group.interface')}>
+    <SettingsRow
+      label={t('settings.theme')}
+      labelId="setting-theme"
+      hint={t('settings.themeHint')}
+      status={changed === 'theme' ? t('settings.applied') : null}
+      {statusKey}
+    >
+      <SegmentedControl
+        size="sm"
+        block
+        labelledby="setting-theme"
+        value={themePreference}
+        onChange={updateTheme}
+        options={[
+          { value: 'system', label: t('settings.theme.system'), icon: 'monitor' },
+          { value: 'light', label: t('settings.theme.light'), icon: 'sun' },
+          { value: 'dark', label: t('settings.theme.dark'), icon: 'moon' },
+        ]}
+      />
+    </SettingsRow>
+    <SettingsRow
+      label={t('settings.language')}
+      labelId="setting-language"
+      hint={t('settings.languageHint')}
+      status={changed === 'language' ? t('settings.applied') : null}
+      {statusKey}
+    >
+      <SegmentedControl
+        size="sm"
+        block
+        labelledby="setting-language"
+        value={getLocalePreference()}
+        onChange={updateLanguage}
+        options={[
+          { value: 'system', label: t('settings.language.system') },
+          { value: 'en', label: t('settings.language.en') },
+          { value: 'ko', label: t('settings.language.ko') },
+        ]}
+      />
+    </SettingsRow>
+  </SettingsGroup>
+</SettingsGrid>

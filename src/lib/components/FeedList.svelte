@@ -1,10 +1,12 @@
 <script lang="ts">
   import { SvelteSet } from 'svelte/reactivity';
   import Icon from '$lib/icons/Icon.svelte';
+  import IconButton from './IconButton.svelte';
   import Spinner from './Spinner.svelte';
   import FeedIcon from './FeedIcon.svelte';
   import { showToast } from '$lib/toast.svelte.ts';
-  import { feedDisplayName } from '$lib/format';
+  import { clickOutside } from '$lib/clickOutside';
+  import { feedDisplayName, feedHasError } from '$lib/format';
   import { t } from '$lib/i18n/index.svelte';
   import type { FeedFolder, FeedSummary, SidebarScope } from '$lib/types';
 
@@ -18,11 +20,16 @@
     selectedStarred?: boolean;
     /** Unread-only mode: hide feeds/folders with nothing unread (§3.16). */
     unreadOnly?: boolean;
+    /** Sidebar filter text: hides feeds/folders whose name doesn't match. */
+    filter?: string;
     onSelectFeed: (feedId: number | null) => void;
     onSelectFolder: (folderId: number | null) => void;
     onSelectToday?: () => void;
     onSelectStarred?: () => void;
     onMoveFeed: (feedId: number, folderId: number | null) => Promise<void>;
+    /** Reorders feeds within one folder (or the unfiled group, `null`); §J. */
+    onReorderFeeds?: (folderId: number | null, feedIds: number[]) => Promise<void>;
+    onTogglePinned?: (feedId: number, pinned: boolean) => Promise<void>;
     onMarkRead?: (scope: SidebarScope) => void;
     onRefreshFeed?: (feedId: number) => void;
     onOpenSettings?: (scope?: SidebarScope) => void;
@@ -37,11 +44,14 @@
     selectedToday = false,
     selectedStarred = false,
     unreadOnly = false,
+    filter = '',
     onSelectFeed,
     onSelectFolder,
     onSelectToday = () => {},
     onSelectStarred = () => {},
     onMoveFeed,
+    onReorderFeeds,
+    onTogglePinned,
     onMarkRead,
     onRefreshFeed,
     onOpenSettings,
@@ -71,24 +81,46 @@
     return byFolder;
   });
 
+  const normalizedFilter = $derived(filter.trim().toLowerCase());
+  function matchesFilter(feed: FeedSummary): boolean {
+    return !normalizedFilter || feedName(feed).toLowerCase().includes(normalizedFilter);
+  }
+  function folderMatchesFilter(folderId: number): boolean {
+    if (!normalizedFilter) return true;
+    const folder = folders.find((f) => f.id === folderId);
+    if (folder?.name.toLowerCase().includes(normalizedFilter)) return true;
+    return (feedsByFolder[folderId] ?? []).some(matchesFilter);
+  }
+
   // In unread-only mode a feed/folder with nothing unread is hidden - except
   // the current selection, so finishing its last post doesn't yank it out
   // of the sidebar; it drops out once the user moves to another view.
   function showFeed(feed: FeedSummary): boolean {
-    return !unreadOnly || feed.unreadCount > 0 || feed.id === selectedFeedId;
+    return (
+      (!unreadOnly || feed.unreadCount > 0 || feed.id === selectedFeedId) && matchesFilter(feed)
+    );
   }
   function showFolder(folderId: number): boolean {
     return (
-      !unreadOnly ||
-      (unreadByFolder[folderId] ?? 0) > 0 ||
-      folderId === selectedFolderId ||
-      (feedsByFolder[folderId] ?? []).some((feed) => feed.id === selectedFeedId)
+      (!unreadOnly ||
+        (unreadByFolder[folderId] ?? 0) > 0 ||
+        folderId === selectedFolderId ||
+        (feedsByFolder[folderId] ?? []).some((feed) => feed.id === selectedFeedId)) &&
+      folderMatchesFilter(folderId)
     );
   }
   const shownFolders = $derived(folders.filter((folder) => showFolder(folder.id)));
   const shownUnfiledFeeds = $derived(unfiledFeeds.filter(showFeed));
   const allCaughtUp = $derived(
     unreadOnly && shownFolders.length === 0 && shownUnfiledFeeds.length === 0,
+  );
+  const noFilterMatches = $derived(
+    !!normalizedFilter && shownFolders.length === 0 && shownUnfiledFeeds.length === 0,
+  );
+  // Shown above the folder list regardless of unread-only/caught-up/filter
+  // state below, as its own always-reachable shortcut (§K).
+  const pinnedFeeds = $derived(
+    feeds.filter((feed) => feed.pinned && !feed.hiddenFromAll).filter(showFeed),
   );
 
   function feedName(feed: FeedSummary): string {
@@ -106,6 +138,25 @@
     }
   }
   const collapsedFolders = new SvelteSet<number>(readCollapsed());
+
+  const PINNED_COLLAPSED_KEY = 'aequo:pinnedCollapsed';
+  let pinnedCollapsed = $state(
+    (() => {
+      try {
+        return localStorage.getItem(PINNED_COLLAPSED_KEY) === 'true';
+      } catch {
+        return false;
+      }
+    })(),
+  );
+  function togglePinnedCollapsed() {
+    pinnedCollapsed = !pinnedCollapsed;
+    try {
+      localStorage.setItem(PINNED_COLLAPSED_KEY, String(pinnedCollapsed));
+    } catch {
+      // Still collapsed for this session.
+    }
+  }
 
   function toggleCollapsed(folderId: number) {
     if (collapsedFolders.has(folderId)) collapsedFolders.delete(folderId);
@@ -151,6 +202,53 @@
     const raw = event.dataTransfer?.getData('text/plain');
     const feedId = raw ? Number(raw) : NaN;
     if (!Number.isNaN(feedId)) moveFeedTo(feedId, folderId);
+  }
+
+  // --- Drag and drop within a folder (§J) ---------------------------------
+
+  let dragOverFeedId = $state<number | null>(null);
+
+  function siblingIds(folderId: number | null): number[] {
+    return (folderId === null ? unfiledFeeds : (feedsByFolder[folderId] ?? [])).map((f) => f.id);
+  }
+
+  async function reorderFeeds(folderId: number | null, feedIds: number[]) {
+    try {
+      await onReorderFeeds?.(folderId, feedIds);
+    } catch (error) {
+      showToast(t('sidebar.moveFailed', { error: String(error) }), { type: 'error' });
+    }
+  }
+
+  function handleFeedDragOver(event: DragEvent, feedId: number) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (draggingFeedId !== feedId) dragOverFeedId = feedId;
+  }
+
+  function handleFeedDragLeave(feedId: number) {
+    if (dragOverFeedId === feedId) dragOverFeedId = null;
+  }
+
+  /** Dropping onto another feed's own row reorders within that feed's
+   * folder; dropping onto a different folder's feed still moves it there,
+   * same as dropping on that folder's header. */
+  function handleFeedDrop(event: DragEvent, target: FeedSummary) {
+    event.preventDefault();
+    event.stopPropagation();
+    dragOverFeedId = null;
+    const raw = event.dataTransfer?.getData('text/plain');
+    const feedId = raw ? Number(raw) : NaN;
+    if (Number.isNaN(feedId) || feedId === target.id) return;
+    const dragged = feeds.find((f) => f.id === feedId);
+    if (!dragged) return;
+    if (dragged.folderId !== target.folderId) {
+      moveFeedTo(feedId, target.folderId);
+      return;
+    }
+    const ids = siblingIds(target.folderId).filter((id) => id !== feedId);
+    ids.splice(ids.indexOf(target.id), 0, feedId);
+    void reorderFeeds(target.folderId, ids);
   }
 
   // --- Row menu: the same actions from `⋯` and from right-click ----------
@@ -223,22 +321,6 @@
     }
   }
 
-  function clickOutside(node: HTMLElement, onOutside: () => void) {
-    function handle(event: MouseEvent) {
-      if (!node.contains(event.target as Node)) onOutside();
-    }
-    document.addEventListener('mousedown', handle, true);
-    return {
-      destroy() {
-        document.removeEventListener('mousedown', handle, true);
-      },
-    };
-  }
-
-  function feedHasError(feed: FeedSummary): boolean {
-    return feed.lastError !== null || feed.consecutiveFailures > 0;
-  }
-
   function feedErrorTooltip(feed: FeedSummary): string {
     if (feed.lastError) return t('sidebar.feedError', { error: feed.lastError });
     return t('sidebar.feedFailures', { count: feed.consecutiveFailures });
@@ -250,7 +332,15 @@
 </script>
 
 {#snippet feedRow(feed: FeedSummary, nested: boolean)}
-  <div class="item-row" class:nested>
+  <div
+    class="item-row"
+    class:nested
+    class:drag-over={dragOverFeedId === feed.id}
+    role="presentation"
+    ondragover={(event) => handleFeedDragOver(event, feed.id)}
+    ondragleave={() => handleFeedDragLeave(feed.id)}
+    ondrop={(event) => handleFeedDrop(event, feed)}
+  >
     <button
       class="row"
       class:selected={selectedFeedId === feed.id}
@@ -275,15 +365,16 @@
       {/if}
       {#if feed.unreadCount > 0}<span class="count">{feed.unreadCount}</span>{/if}
     </button>
-    <button
-      type="button"
-      class="row-icon-button more"
-      aria-label={t('sidebar.actionsFor', { name: feedName(feed) })}
-      aria-haspopup="menu"
-      aria-expanded={menu?.kind === 'feed' && menu.feed.id === feed.id}
+    <IconButton
+      class="more"
+      size="sm"
+      iconSize={14}
+      icon="more"
+      label={t('sidebar.actionsFor', { name: feedName(feed) })}
+      ariaHaspopup="menu"
+      ariaExpanded={menu?.kind === 'feed' && menu.feed.id === feed.id}
       onclick={(event) => openMenuFromButton({ kind: 'feed', feed }, event)}
-      ><Icon name="more" size={14} /></button
-    >
+    />
   </div>
 {/snippet}
 
@@ -318,6 +409,37 @@
     <span class="title">{t('sidebar.starred')}</span>
   </button>
 
+  {#if pinnedFeeds.length > 0}
+    <!-- "Pinned" is a filtered view over feed.pinned, not a real foldable
+         entity, so unlike a folder it has no ⋯ menu (nothing sensible to put
+         in it - no rename/delete/bulk-unpin exists) and no drag target
+         (pinning already has one clear affordance: the per-feed ⋯ menu's
+         pin/unpin toggle). Intentional asymmetry, not an oversight
+         (docs/PANEL_DESIGN_UNIFICATION_PLAN.md §4.1-C). -->
+    <div class="folder-group" role="group" aria-label={t('sidebar.pinned')}>
+      <div class="item-row folder-row">
+        <button
+          class="row-icon-button chevron"
+          class:collapsed={pinnedCollapsed}
+          type="button"
+          aria-expanded={!pinnedCollapsed}
+          aria-label={t(pinnedCollapsed ? 'sidebar.expand' : 'sidebar.collapse', {
+            name: t('sidebar.pinned'),
+          })}
+          onclick={togglePinnedCollapsed}
+          ><Icon name="chevron-down" size={12} /></button
+        >
+        <span class="row-icon"><Icon name="star" size={13} /></span>
+        <span class="title">{t('sidebar.pinned')}</span>
+      </div>
+      {#if !pinnedCollapsed}
+        {#each pinnedFeeds as feed (feed.id)}
+          {@render feedRow(feed, true)}
+        {/each}
+      {/if}
+    </div>
+  {/if}
+
   {#if loading && feeds.length === 0 && folders.length === 0}
     <div class="empty-placeholder">
       <Spinner size={20} />
@@ -330,12 +452,14 @@
     </div>
   {:else if allCaughtUp}
     <p class="caught-up">{t('sidebar.caughtUp')}</p>
+  {:else if noFilterMatches}
+    <p class="caught-up">{t('sidebar.noFilterMatches')}</p>
   {:else}
     <div class="groups">
       {#each shownFolders as folder (folder.id)}
         {@const folderFeeds = feedsByFolder[folder.id] ?? []}
         {@const folderUnread = unreadByFolder[folder.id] ?? 0}
-        {@const isCollapsed = collapsedFolders.has(folder.id)}
+        {@const isCollapsed = normalizedFilter ? false : collapsedFolders.has(folder.id)}
         <div
           class="folder-group"
           role="group"
@@ -373,15 +497,16 @@
               <span class="title">{folder.name}</span>
               {#if folderUnread > 0}<span class="count">{folderUnread}</span>{/if}
             </button>
-            <button
-              type="button"
-              class="row-icon-button more"
-              aria-label={t('sidebar.actionsFor', { name: folder.name })}
-              aria-haspopup="menu"
-              aria-expanded={menu?.kind === 'folder' && menu.folder.id === folder.id}
+            <IconButton
+              class="more"
+              size="sm"
+              iconSize={14}
+              icon="more"
+              label={t('sidebar.actionsFor', { name: folder.name })}
+              ariaHaspopup="menu"
+              ariaExpanded={menu?.kind === 'folder' && menu.folder.id === folder.id}
               onclick={(event) => openMenuFromButton({ kind: 'folder', folder }, event)}
-              ><Icon name="more" size={14} /></button
-            >
+            />
           </div>
           {#if !isCollapsed}
             {#if folderFeeds.length === 0}
@@ -420,7 +545,7 @@
 {#if menu}
   {@const current = menu}
   <div
-    class="menu"
+    class="menu ui-popup"
     role="menu"
     tabindex="-1"
     style:left="{current.x}px"
@@ -449,6 +574,14 @@
         role="menuitem"
         onclick={() => runMenuAction(() => onRefreshFeed?.(feed.id))}
         ><Icon name="retry" size={14} />{t('sidebar.refresh')}</button
+      >
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => runMenuAction(() => onTogglePinned?.(feed.id, !feed.pinned))}
+        ><Icon name={feed.pinned ? 'star' : 'star-outline'} size={14} />{t(
+          feed.pinned ? 'sidebar.unpin' : 'sidebar.pin',
+        )}</button
       >
       {#if folders.length > 0}
         <div class="menu-separator" role="separator"></div>
@@ -602,17 +735,21 @@
 
   /* `⋯` keeps its width (no row shift) and only shows on hover, keyboard
      focus within the row, or while its menu is open; without a hover-capable
-     pointer it stays visible. */
-  .more {
+     pointer it stays visible. `.more` is now IconButton's own root element
+     (passed through via its `class` prop), so it needs :global() to match
+     past IconButton's own Svelte scoping - scoped under the (locally-scoped)
+     `.item-row` ancestor so this doesn't leak to an unrelated `.more`
+     elsewhere in the app. */
+  .item-row :global(.more) {
     opacity: 0;
   }
-  .item-row:hover .more,
-  .item-row:focus-within .more,
-  .more[aria-expanded='true'] {
+  .item-row:hover :global(.more),
+  .item-row:focus-within :global(.more),
+  .item-row :global(.more[aria-expanded='true']) {
     opacity: 1;
   }
   @media (hover: none) {
-    .more {
+    .item-row :global(.more) {
       opacity: 1;
     }
   }
@@ -670,6 +807,12 @@
     background: var(--color-selection-bg);
   }
 
+  .item-row.drag-over {
+    border-radius: var(--radius-sm);
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+
   .menu {
     position: fixed;
     z-index: 60;
@@ -678,23 +821,19 @@
     max-height: 320px;
     flex-direction: column;
     overflow-y: auto;
-    padding: var(--space-1);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-bg);
-    box-shadow: var(--shadow-popover);
   }
   .menu button {
+    min-height: var(--control-size);
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: 6px var(--space-2);
+    padding: var(--space-2);
     border: 0;
-    border-radius: var(--radius-xs);
+    border-radius: var(--control-radius);
     background: transparent;
     color: var(--color-text);
     font: inherit;
-    font-size: var(--text-body);
+    font-size: var(--text-small);
     text-align: left;
     cursor: pointer;
   }

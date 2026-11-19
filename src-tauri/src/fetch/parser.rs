@@ -83,6 +83,11 @@ pub fn to_new_items(parsed: &Feed, bytes: &[u8], fetched_at: i64) -> Vec<NewItem
             };
 
             NewItem {
+                published_at_kind: if entry.published.or(entry.updated).is_some() {
+                    "timestamp"
+                } else {
+                    "discovered"
+                },
                 guid_hash: guid_hash(entry),
                 title: entry.title.as_ref().map(|t| t.content.clone()),
                 link: entry.links.first().map(|l| l.href.clone()),

@@ -189,7 +189,10 @@ fn best_fragment_array(root: &Value) -> Option<String> {
             return;
         }
         let joined_len = strip_tags(&joined).trim().len();
-        let best_len = best.as_deref().map(|b| strip_tags(b).trim().len()).unwrap_or(0);
+        let best_len = best
+            .as_deref()
+            .map(|b| strip_tags(b).trim().len())
+            .unwrap_or(0);
         if joined_len > best_len {
             best = Some(joined);
         }
@@ -202,8 +205,7 @@ fn best_fragment_array(root: &Value) -> Option<String> {
 /// there's no word boundary between `p` and the following word
 /// character in either, so `p\b` never matches inside them.
 fn tag_hits(s: &str) -> usize {
-    let re =
-        Regex::new(r"(?is)</?(p|h[1-6]|ul|ol|li|blockquote|pre|img|figure)\b").unwrap();
+    let re = Regex::new(r"(?is)</?(p|h[1-6]|ul|ol|li|blockquote|pre|img|figure)\b").unwrap();
     re.find_iter(s).count()
 }
 
@@ -247,9 +249,10 @@ fn find_title_devalue(items: &[Value], content: &str) -> Option<String> {
             continue;
         }
         if let Some(title_idx) = map.get("title").and_then(Value::as_u64)
-            && let Some(Value::String(title)) = items.get(title_idx as usize) {
-                return Some(title.clone());
-            }
+            && let Some(Value::String(title)) = items.get(title_idx as usize)
+        {
+            return Some(title.clone());
+        }
     }
     None
 }
@@ -264,9 +267,10 @@ fn find_title_sibling(value: &Value, content: &str, depth: usize) -> Option<Stri
     match value {
         Value::Object(map) => {
             if map.values().any(|v| v.as_str() == Some(content))
-                && let Some(title) = map.get("title").and_then(Value::as_str) {
-                    return Some(title.to_string());
-                }
+                && let Some(title) = map.get("title").and_then(Value::as_str)
+            {
+                return Some(title.to_string());
+            }
             map.values()
                 .find_map(|v| find_title_sibling(v, content, depth + 1))
         }
@@ -326,7 +330,11 @@ mod tests {
 </script>
 </body></html>"#;
         let result = extract(html).expect("should find hydration content");
-        assert!(result.content_html.starts_with("<p>This is the first paragraph"));
+        assert!(
+            result
+                .content_html
+                .starts_with("<p>This is the first paragraph")
+        );
         assert_eq!(result.title, Some("The Real Post Title".to_string()));
     }
 
@@ -356,7 +364,11 @@ mod tests {
             r#"<html><body><script id="__NEXT_DATA__" type="application/json">{{"comments":"{comments}","article":"{article}"}}</script></body></html>"#
         );
         let result = extract(&html).expect("should find hydration content");
-        assert!(result.content_html.starts_with("<p>This is a much longer paragraph"));
+        assert!(
+            result
+                .content_html
+                .starts_with("<p>This is a much longer paragraph")
+        );
     }
 
     #[test]

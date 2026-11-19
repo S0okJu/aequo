@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatDayHeading, formatRelative, shortFeedTitle, stripSyndicationFooter } from './format';
+import {
+  articleDateLabel,
+  articleDateTitle,
+  articleDayKey,
+  feedDisplayName,
+  formatDayHeading,
+  formatRelative,
+  shortFeedTitle,
+  stripSyndicationFooter,
+} from './format';
 
 const now = Date.UTC(2026, 10, 17, 12, 0, 0) / 1000;
 
@@ -75,4 +84,30 @@ describe('shortFeedTitle', () => {
   it('falls back when the title is empty', () => {
     expect(shortFeedTitle(null, 'https://example.com/feed')).toBe('https://example.com/feed');
   });
+});
+
+describe('HTML listing dates and source names', () => {
+  it('keeps the site name when the leading title is generic', () => {
+    expect(shortFeedTitle('Blog | Kata Containers')).toBe('Kata Containers');
+    expect(shortFeedTitle('News — Example')).toBe('Example');
+    expect(shortFeedTitle('The New Stack | DevOps')).toBe('The New Stack');
+  });
+});
+
+it('distinguishes discovery time from a precise publication date', () => {
+  expect(articleDateLabel({ publishedAt: now - 60, publishedAtKind: 'discovered' }, now)).toMatch(
+    /Collected|수집/,
+  );
+  const item = { publishedAt: Date.UTC(2026, 10, 3) / 1000, publishedAtKind: 'date' as const };
+  expect(articleDayKey(item)).toBe('2026-10-3');
+  expect(articleDateTitle(item)).toMatch(/2026/);
+  expect(articleDateLabel(item, now)).not.toMatch(/ago|수집|Collected/);
+  expect(formatDayHeading(item.publishedAt, now, 'en', true)).toBe('Tuesday, November 3');
+  expect(
+    feedDisplayName({
+      title: 'Blog | Kata Containers',
+      url: 'https://katacontainers.io/blog/',
+      customTitle: 'My Kata',
+    }),
+  ).toBe('My Kata');
 });
