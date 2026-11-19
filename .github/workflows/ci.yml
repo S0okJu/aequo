@@ -77,7 +77,7 @@ jobs:
           app="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Aequo.app"
           test "$(lipo -archs "$app/Contents/MacOS/aequo")" = arm64
           codesign --verify --deep --strict --verbose=2 "$app"
-          codesign --display --verbose=4 "$app" 2>&1 | rg '^Signature=adhoc$'
+          codesign --display --verbose=4 "$app" 2>&1 | grep -x 'Signature=adhoc'
           for dmg in src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg; do
             hdiutil verify "$dmg"
           done
