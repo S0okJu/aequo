@@ -412,12 +412,15 @@
                 <div class="confirm-row">
                   <span>{t('subs.deleteFolderConfirm', { name: folder.name, count })}</span>
                   <div class="confirm-actions">
-                    <button type="button" onclick={() => (confirmingDeleteFolderId = null)}
+                    <button
+                      type="button"
+                      class="ui-action ui-action--secondary"
+                      onclick={() => (confirmingDeleteFolderId = null)}
                       >{t('common.cancel')}</button
                     >
                     <button
                       type="button"
-                      class="confirm-remove"
+                      class="confirm-remove ui-action ui-action--secondary"
                       disabled={folderBusy}
                       onclick={() => confirmDeleteFolder(folder)}
                       >{folderBusy ? t('subs.deleting') : t('common.delete')}</button
@@ -642,7 +645,7 @@
             {#if !confirmingUnsubscribe}
               <button
                 type="button"
-                class="small danger"
+                class="small ui-action ui-action--danger"
                 onclick={() => (confirmingUnsubscribe = true)}>{t('subs.unsubscribe')}</button
               >
             {/if}
@@ -651,12 +654,15 @@
             <div class="confirm-row">
               <span>{t('subs.unsubscribeConfirm', { name: feedDisplayName(feed) })}</span>
               <div class="confirm-actions">
-                <button type="button" onclick={() => (confirmingUnsubscribe = false)}
+                <button
+                  type="button"
+                  class="ui-action ui-action--secondary"
+                  onclick={() => (confirmingUnsubscribe = false)}
                   >{t('common.cancel')}</button
                 >
                 <button
                   type="button"
-                  class="confirm-remove"
+                  class="confirm-remove ui-action ui-action--secondary"
                   disabled={removing}
                   onclick={() => unsubscribe(feed)}
                   >{removing ? t('subs.removing') : t('subs.unsubscribe')}</button
@@ -901,6 +907,27 @@
     font-size: var(--text-small);
   }
 
+  .confirm-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2) 0;
+    color: var(--color-text);
+    font-size: var(--text-small);
+  }
+
+  .confirm-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-2);
+  }
+
+  .confirm-remove {
+    color: var(--color-error);
+    border-color: color-mix(in srgb, var(--color-error) 35%, var(--color-border));
+  }
+
   .detail {
     display: flex;
     min-height: 0;
@@ -1050,10 +1077,6 @@
   button.primary:hover:not(:disabled) {
     background: var(--color-accent-solid);
     filter: brightness(0.95);
-  }
-
-  button.danger {
-    color: var(--color-error);
   }
 
   button:disabled {
