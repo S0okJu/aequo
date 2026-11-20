@@ -115,70 +115,67 @@ async fn subscribe(
     let (url, bytes) = fetch::client::fetch_page(&url)
         .await
         .map_err(|e| fetch::client::describe_error(&e))?;
+    let now = now_unix();
 
-    match fetch::parser::parse(&bytes) {
-        Ok(parsed) => {
-            let now = now_unix();
-            let format = fetch::parser::format_label(&parsed);
-            let title = feed_title(&parsed);
-            let mut initial =
-                InitialItems::new(fetch::parser::to_new_items(&parsed, &bytes, now), false);
-            // This feed row doesn't exist yet, so every item is new -
-            // no DB read needed to know nothing already has content.
-            fetch::enrichment::enrich_missing_full_content(
-                &mut initial.items,
-                &HashSet::new(),
-                policy,
-            )
+    // A syntactically valid but empty feed (seen in the wild) should not
+    // win over the discovery/scraper fallback below, which might still
+    // find real content - same rule `discovery.rs` applies to its own
+    // candidates, extended here to the directly-fetched URL too.
+    let direct = fetch::parser::parse(&bytes);
+    if let Ok(parsed) = &direct
+        && !parsed.entries.is_empty()
+    {
+        let format = fetch::parser::format_label(parsed);
+        let title = feed_title(parsed);
+        let mut initial =
+            InitialItems::new(fetch::parser::to_new_items(parsed, &bytes, now), false);
+        // This feed row doesn't exist yet, so every item is new -
+        // no DB read needed to know nothing already has content.
+        fetch::enrichment::enrich_missing_full_content(&mut initial.items, &HashSet::new(), policy)
             .await;
 
-            let language = fetch::parser::feed_language(&parsed);
-            let conn = lock_conn(db_state)?;
-            store_initial_feed(
-                &conn,
-                &url,
-                title.as_deref(),
-                format,
-                language.as_deref(),
-                &initial,
-            )
-        }
-        Err(feed_error) => {
-            let now = now_unix();
-            // Discovery and the webpage scraper fallback both need no DB
-            // access, so the connection is locked only once we're ready to
-            // write - holding it across an enrichment/discovery `.await`
-            // would make this command's future non-`Send`.
-            if let Some(discovered) = fetch::discovery::discover(&url, &bytes).await
-                && let Ok(parsed) = fetch::parser::parse(&discovered.bytes)
-            {
-                let format = fetch::parser::format_label(&parsed);
-                let title = feed_title(&parsed);
-                let mut initial = InitialItems::new(
-                    fetch::parser::to_new_items(&parsed, &discovered.bytes, now),
-                    false,
-                );
-                fetch::enrichment::enrich_missing_full_content(
-                    &mut initial.items,
-                    &HashSet::new(),
-                    policy,
-                )
-                .await;
+        let language = fetch::parser::feed_language(parsed);
+        let conn = lock_conn(db_state)?;
+        return store_initial_feed(
+            &conn,
+            &url,
+            title.as_deref(),
+            format,
+            language.as_deref(),
+            &initial,
+        );
+    }
 
-                let language = fetch::parser::feed_language(&parsed);
-                let conn = lock_conn(db_state)?;
-                return store_initial_feed(
-                    &conn,
-                    &discovered.url,
-                    title.as_deref(),
-                    format,
-                    language.as_deref(),
-                    &initial,
-                );
-            }
-            let listing = fetch::webpage::parse(&url, &bytes, now).map_err(|page_error| {
-                format!("Not a supported feed ({feed_error}) or article page ({page_error})")
-            })?;
+    // Discovery and the webpage scraper fallback both need no DB access,
+    // so the connection is locked only once we're ready to write - holding
+    // it across an enrichment/discovery `.await` would make this command's
+    // future non-`Send`.
+    if let Some(discovered) = fetch::discovery::discover(&url, &bytes).await
+        && let Ok(parsed) = fetch::parser::parse(&discovered.bytes)
+    {
+        let format = fetch::parser::format_label(&parsed);
+        let title = feed_title(&parsed);
+        let mut initial = InitialItems::new(
+            fetch::parser::to_new_items(&parsed, &discovered.bytes, now),
+            false,
+        );
+        fetch::enrichment::enrich_missing_full_content(&mut initial.items, &HashSet::new(), policy)
+            .await;
+
+        let language = fetch::parser::feed_language(&parsed);
+        let conn = lock_conn(db_state)?;
+        return store_initial_feed(
+            &conn,
+            &discovered.url,
+            title.as_deref(),
+            format,
+            language.as_deref(),
+            &initial,
+        );
+    }
+
+    match fetch::webpage::parse(&url, &bytes, now) {
+        Ok(listing) => {
             let mut initial = InitialItems::new(listing.items, true);
             fetch::enrichment::enrich_missing_full_content(
                 &mut initial.items,
@@ -197,6 +194,27 @@ async fn subscribe(
                 &initial,
             )
         }
+        // Neither discovery nor the scraper found anything. A real, if
+        // currently content-less, feed still beats refusing to subscribe.
+        Err(page_error) => match direct {
+            Ok(parsed) => {
+                let format = fetch::parser::format_label(&parsed);
+                let title = feed_title(&parsed);
+                let language = fetch::parser::feed_language(&parsed);
+                let conn = lock_conn(db_state)?;
+                store_initial_feed(
+                    &conn,
+                    &url,
+                    title.as_deref(),
+                    format,
+                    language.as_deref(),
+                    &InitialItems::new(Vec::new(), false),
+                )
+            }
+            Err(feed_error) => Err(format!(
+                "Not a supported feed ({feed_error}) or article page ({page_error})"
+            )),
+        },
     }
 }
 
@@ -486,6 +504,76 @@ mod collection_flow_tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn a_syntactically_valid_but_empty_direct_feed_falls_back_to_discovery() {
+        // Some sites (e.g. tech.kakaopay.com) serve a real, well-formed feed
+        // at the URL a user might subscribe to directly, but it has zero
+        // `<item>`s. That must not win over a conventional-path sibling
+        // feed that actually has content.
+        let server = MockServer::start().await;
+        let base = server.uri();
+        Mock::given(method("GET"))
+            .and(path("/empty.xml"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "<rss version=\"2.0\"><channel><title>Empty</title></channel></rss>",
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/feed"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(rss(&base, 50)))
+            .mount(&server)
+            .await;
+
+        let conn = Mutex::new(db::init_in_memory().unwrap());
+        let id = subscribe(
+            &conn,
+            format!("{base}/empty.xml"),
+            &ResourcePolicy::default(),
+        )
+        .await
+        .unwrap();
+        let c = conn.lock().unwrap();
+        assert_eq!(db::count_unread(&c, id).unwrap(), 10);
+        assert_eq!(
+            db::get_feed_meta(&c, id).unwrap().unwrap().url,
+            format!("{base}/feed")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_syntactically_valid_but_empty_direct_feed_with_no_alternative_is_still_kept() {
+        // Nothing better exists anywhere - refusing to subscribe at all
+        // would be worse than keeping the real (if content-less) feed.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/empty.xml"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "<rss version=\"2.0\"><channel><title>Empty</title></channel></rss>",
+            ))
+            .mount(&server)
+            .await;
+
+        let conn = Mutex::new(db::init_in_memory().unwrap());
+        let id = subscribe(
+            &conn,
+            format!("{}/empty.xml", server.uri()),
+            &ResourcePolicy::default(),
+        )
+        .await
+        .unwrap();
+        let c = conn.lock().unwrap();
+        assert_eq!(db::count_unread(&c, id).unwrap(), 0);
+        assert_eq!(
+            db::get_feed_meta(&c, id)
+                .unwrap()
+                .unwrap()
+                .format
+                .as_deref(),
+            Some("rss")
+        );
     }
 }
 

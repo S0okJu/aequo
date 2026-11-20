@@ -11,6 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
 
+use fetch::raw_store::RawContentStore;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -31,6 +33,7 @@ pub fn run() {
             };
             std::fs::create_dir_all(&app_data_dir)?;
             let db_path = db::resolve_db_path(&app_data_dir);
+            app.manage(RawContentStore::new(&app_data_dir));
 
             let conn = db::init(&db_path)?;
             let configured = app
@@ -135,6 +138,7 @@ pub fn run() {
             commands::refresh_feed::refresh_feed,
             commands::list_feeds,
             commands::get_feed_icons,
+            commands::get_feed_raw_content,
             commands::list_items,
             commands::get_item_summary,
             commands::count_unread_items,

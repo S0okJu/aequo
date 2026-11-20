@@ -1,7 +1,9 @@
 <script lang="ts">
   import { SvelteSet } from 'svelte/reactivity';
   import { fly } from 'svelte/transition';
+  import FeedFormatBadge from '../FeedFormatBadge.svelte';
   import FeedIcon from '../FeedIcon.svelte';
+  import FeedSourceDialog from './FeedSourceDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import IconButton from '../IconButton.svelte';
   import ErrorCard from '../ErrorCard.svelte';
@@ -15,7 +17,7 @@
     setFeedRefreshInterval,
     updateFeedOrganization,
   } from '$lib/api';
-  import { feedDisplayName, formatDateTime } from '$lib/format';
+  import { feedDisplayName, feedSourceLabel, formatDateTime } from '$lib/format';
   import { t } from '$lib/i18n/index.svelte';
   import { rise } from '$lib/motion';
   import type { FeedFolder, FeedSummary } from '$lib/types';
@@ -105,6 +107,7 @@
   let confirmingUnsubscribe = $state(false);
   let removing = $state(false);
   let copied = $state(false);
+  let sourceDialogOpen = $state(false);
 
   // Reset per-feed editing state when another feed is selected.
   $effect(() => {
@@ -113,6 +116,7 @@
     saveStatus = null;
     confirmingUnsubscribe = false;
     copied = false;
+    sourceDialogOpen = false;
   });
 
   const nameDirty = $derived(
@@ -281,6 +285,7 @@
   >
     <FeedIcon {feed} />
     <span class="feed-name">{feedDisplayName(feed)}</span>
+    <FeedFormatBadge format={feed.format} />
     {#if hasError(feed)}
       <span class="feed-error" role="img" aria-label={t('subs.needsAttention')}
         ><Icon name="error" size={12} /></span
@@ -516,6 +521,7 @@
         <header class="detail-header">
           <FeedIcon {feed} size={20} />
           <h2 id="feed-detail-title">{feedDisplayName(feed)}</h2>
+          <FeedFormatBadge format={feed.format} />
           <IconButton icon="close" label={t('subs.closeDetail')} onclick={closeDetail} />
         </header>
 
@@ -639,10 +645,15 @@
               onclick={() => refreshSelected(feed)}
               >{refreshing.has(feed.id) ? t('subs.refreshing') : t('subs.refreshNow')}</button
             >
+            <button
+              type="button"
+              class="small ui-action ui-action--secondary"
+              onclick={() => (sourceDialogOpen = true)}>{feedSourceLabel(feed.format)}</button
+            >
             {#if !confirmingUnsubscribe}
               <button
                 type="button"
-                class="small danger"
+                class="small ui-action ui-action--danger"
                 onclick={() => (confirmingUnsubscribe = true)}>{t('subs.unsubscribe')}</button
               >
             {/if}
@@ -669,6 +680,14 @@
     {/if}
   </div>
 </div>
+
+<FeedSourceDialog
+  open={sourceDialogOpen}
+  feedId={selected?.id ?? null}
+  feedName={selected ? feedDisplayName(selected) : ''}
+  format={selected?.format ?? null}
+  onClose={() => (sourceDialogOpen = false)}
+/>
 
 <style>
   .subscriptions-shell {
@@ -1050,10 +1069,6 @@
   button.primary:hover:not(:disabled) {
     background: var(--color-accent-solid);
     filter: brightness(0.95);
-  }
-
-  button.danger {
-    color: var(--color-error);
   }
 
   button:disabled {

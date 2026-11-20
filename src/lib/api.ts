@@ -19,6 +19,7 @@ import type {
   CleanupPreview,
   CleanupResult,
   FeedFolder,
+  FeedRawContent,
   ResourceSettings,
   ResourceStatus,
 } from './types';
@@ -92,6 +93,11 @@ export function setFeedRefreshInterval(feedId: number, intervalSecs: number): Pr
 /** Stored feed icons as `data:` URIs keyed by feed id (fetched in the background). */
 export function getFeedIcons(feedIds: number[]): Promise<Record<number, string>> {
   return invoke('get_feed_icons', { feedIds });
+}
+
+/** The feed's raw document as of its last successful poll, if it has had one. */
+export function getFeedRawContent(feedId: number): Promise<FeedRawContent | null> {
+  return invoke('get_feed_raw_content', { feedId });
 }
 
 export type ItemCursor = { publishedAt: number; id: number };

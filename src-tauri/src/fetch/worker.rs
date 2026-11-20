@@ -16,6 +16,7 @@ use super::backoff;
 use super::client::{self, ConditionalFetch};
 use super::enrichment;
 use super::parser;
+use super::raw_store::RawContentStore;
 
 /// What happened when polling a feed.
 #[derive(Debug, PartialEq)]
@@ -48,6 +49,10 @@ fn now_unix() -> i64 {
 /// (RSS `<language>` / Atom `xml:lang`; `None` for article-list pages).
 type ParsedFetch = (Vec<NewItem>, Option<String>, Vec<String>);
 
+/// The response's caching headers, adopted on a successful `200 OK`
+/// (§4.1) so the next poll can send a conditional request.
+type ConditionalHeaders = (Option<String>, Option<String>);
+
 /// Parses a fetched body into candidate items - pure, no DB access, so
 /// it can run before any lock is acquired.
 fn parse_items(meta: &FeedMeta, bytes: &[u8], now: i64) -> Result<ParsedFetch, String> {
@@ -76,10 +81,12 @@ fn apply_parsed(
     conn: &Connection,
     meta: &FeedMeta,
     parsed_items: Result<ParsedFetch, String>,
-    etag: Option<String>,
-    last_modified: Option<String>,
+    raw_content: &[u8],
+    raw_store: &RawContentStore,
+    caching: ConditionalHeaders,
     now: i64,
 ) -> Result<PollOutcome, String> {
+    let (etag, last_modified) = caching;
     match parsed_items {
         Ok((items, language, rejected)) => {
             let tx = rusqlite::Transaction::new_unchecked(
@@ -120,6 +127,13 @@ fn apply_parsed(
             .map_err(|e| e.to_string())?;
 
             tx.commit().map_err(|e| e.to_string())?;
+
+            // Best-effort: this is a disposable cache (view-source only),
+            // so a write failure (disk full, permissions) shouldn't turn
+            // an otherwise-successful poll into a reported failure.
+            if let Err(error) = raw_store.write(meta.id, raw_content) {
+                eprintln!("feed {}: failed to cache raw content: {error}", meta.id);
+            }
             Ok(if changed {
                 PollOutcome::Reconciled { new_item_count }
             } else {
@@ -147,10 +161,15 @@ fn apply_not_modified(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome,
 /// article pre-fetch), and stores new items (200), or records the
 /// failure (§7) if the fetch itself errored.
 #[cfg(test)]
-pub async fn poll_feed(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome, String> {
-    let repair = meta.format.as_deref() == Some("website")
-        && db::website_needs_repair(conn, meta.id, super::webpage::PARSER_VERSION)
-            .map_err(|e| e.to_string())?;
+pub async fn poll_feed(
+    conn: &Connection,
+    meta: &FeedMeta,
+    raw_store: &RawContentStore,
+) -> Result<PollOutcome, String> {
+    let repair = !raw_store.has_content(meta.id)
+        || (meta.format.as_deref() == Some("website")
+            && db::website_needs_repair(conn, meta.id, super::webpage::PARSER_VERSION)
+                .map_err(|e| e.to_string())?);
     match client::fetch_conditional(
         &meta.url,
         if repair { None } else { meta.etag.as_deref() },
@@ -184,7 +203,15 @@ pub async fn poll_feed(conn: &Connection, meta: &FeedMeta) -> Result<PollOutcome
                 )
                 .await;
             }
-            apply_parsed(conn, meta, parsed_items, etag, last_modified, now)
+            apply_parsed(
+                conn,
+                meta,
+                parsed_items,
+                &bytes,
+                raw_store,
+                (etag, last_modified),
+                now,
+            )
         }
         Err(err) => record_failure(conn, meta, &client::describe_error(&err)),
     }
@@ -205,6 +232,7 @@ pub async fn poll_feed_locked(
     meta: &FeedMeta,
     policy: &ResourcePolicy,
     manual: bool,
+    raw_store: &RawContentStore,
 ) -> Result<PollOutcome, String> {
     let _permit = policy.acquire(WorkKind::Feed, false).await;
     // Re-read after waiting: another poll or a policy change may have moved
@@ -225,14 +253,18 @@ pub async fn poll_feed_locked(
     if due_at > now_unix() && (!manual || meta.consecutive_failures > 0) {
         return Ok(PollOutcome::Deferred { until: due_at });
     }
-    let repair = meta.format.as_deref() == Some("website")
-        && (manual || {
-            let guard = conn
-                .lock()
-                .map_err(|_| "database lock poisoned".to_string())?;
-            db::website_needs_repair(&guard, meta.id, super::webpage::PARSER_VERSION)
-                .map_err(|e| e.to_string())?
-        });
+    // A feed with no cached source yet (new, or predating this feature)
+    // forces one unconditional fetch - otherwise a feed that's already
+    // up to date would keep getting 304s forever and never backfill it.
+    let repair = !raw_store.has_content(meta.id)
+        || (meta.format.as_deref() == Some("website")
+            && (manual || {
+                let guard = conn
+                    .lock()
+                    .map_err(|_| "database lock poisoned".to_string())?;
+                db::website_needs_repair(&guard, meta.id, super::webpage::PARSER_VERSION)
+                    .map_err(|e| e.to_string())?
+            }));
     let fetched = client::fetch_conditional(
         &meta.url,
         if repair { None } else { meta.etag.as_deref() },
@@ -276,7 +308,15 @@ pub async fn poll_feed_locked(
             let guard = conn
                 .lock()
                 .map_err(|_| "database lock poisoned".to_string())?;
-            apply_parsed(&guard, &meta, parsed_items, etag, last_modified, now)
+            apply_parsed(
+                &guard,
+                &meta,
+                parsed_items,
+                &bytes,
+                raw_store,
+                (etag, last_modified),
+                now,
+            )
         }
         Err(err) => {
             let guard = conn
@@ -320,6 +360,7 @@ mod tests {
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    use super::super::raw_store::temp_store;
     use super::*;
 
     #[tokio::test]
@@ -349,18 +390,26 @@ mod tests {
         let meta = db::get_feed_meta(&conn.lock().unwrap(), id)
             .unwrap()
             .unwrap();
-        let auto = poll_feed_locked(&conn, &meta, &policy, false)
+        // Already has cached content, so the "nothing cached yet" repair
+        // path doesn't force an unconditional fetch here.
+        let raw_store = temp_store();
+        raw_store.write(id, b"<rss></rss>").unwrap();
+        let auto = poll_feed_locked(&conn, &meta, &policy, false, &raw_store)
             .await
             .unwrap();
         assert_eq!(auto, PollOutcome::Deferred { until: now + 1800 });
         assert_eq!(server.received_requests().await.unwrap().len(), 0);
         assert_eq!(
-            poll_feed_locked(&conn, &meta, &policy, true).await.unwrap(),
+            poll_feed_locked(&conn, &meta, &policy, true, &raw_store)
+                .await
+                .unwrap(),
             PollOutcome::NotModified
         );
         db::update_feed_failed(&conn.lock().unwrap(), id, "retry later", now + 300, 1).unwrap();
         assert_eq!(
-            poll_feed_locked(&conn, &meta, &policy, true).await.unwrap(),
+            poll_feed_locked(&conn, &meta, &policy, true, &raw_store)
+                .await
+                .unwrap(),
             PollOutcome::Deferred { until: now + 300 }
         );
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
@@ -389,8 +438,9 @@ mod tests {
         let conn = db::init_in_memory().unwrap();
         let feed_id = db::insert_feed(&conn, &url, None, None, 0).unwrap();
         let meta = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        let raw_store = temp_store();
 
-        let outcome = poll_feed(&conn, &meta).await.unwrap();
+        let outcome = poll_feed(&conn, &meta, &raw_store).await.unwrap();
         assert_eq!(outcome, PollOutcome::Updated { new_item_count: 2 });
 
         let updated = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
@@ -400,6 +450,43 @@ mod tests {
             Some("Mon, 01 Jan 2024 00:00:00 GMT".to_string())
         );
         assert!(updated.next_fetch_at > 0);
+
+        let raw = raw_store.read(feed_id).unwrap().unwrap();
+        assert_eq!(raw.content, RSS2_FIXTURE);
+    }
+
+    #[tokio::test]
+    async fn not_modified_poll_keeps_the_previous_raw_content() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/feed.xml"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(RSS2_FIXTURE)
+                    .insert_header("ETag", "\"abc123\""),
+            )
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/feed.xml"))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(&mock_server)
+            .await;
+
+        let url = format!("{}/feed.xml", mock_server.uri());
+        let conn = db::init_in_memory().unwrap();
+        let feed_id = db::insert_feed(&conn, &url, None, None, 0).unwrap();
+        let meta = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        let raw_store = temp_store();
+        poll_feed(&conn, &meta, &raw_store).await.unwrap();
+
+        let meta = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        let outcome = poll_feed(&conn, &meta, &raw_store).await.unwrap();
+        assert_eq!(outcome, PollOutcome::NotModified);
+
+        let raw = raw_store.read(feed_id).unwrap().unwrap();
+        assert_eq!(raw.content, RSS2_FIXTURE);
     }
 
     #[tokio::test]
@@ -432,7 +519,7 @@ mod tests {
         let feed_id = db::insert_feed(&conn, &url, None, None, 0).unwrap();
         let meta = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
 
-        let outcome = poll_feed(&conn, &meta).await.unwrap();
+        let outcome = poll_feed(&conn, &meta, &temp_store()).await.unwrap();
         assert_eq!(outcome, PollOutcome::Updated { new_item_count: 2 });
 
         // `db::list_items` deliberately nulls `full_content` for list
@@ -461,8 +548,12 @@ mod tests {
         let feed_id = db::insert_feed(&conn, &url, None, None, 0).unwrap();
         db::update_feed_fetched(&conn, feed_id, Some("\"etag-1\""), None, 0).unwrap();
         let meta = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
+        // Already has cached content, so this poll sends the conditional
+        // request the mock expects rather than an unconditional backfill.
+        let raw_store = temp_store();
+        raw_store.write(feed_id, b"<rss></rss>").unwrap();
 
-        let outcome = poll_feed(&conn, &meta).await.unwrap();
+        let outcome = poll_feed(&conn, &meta, &raw_store).await.unwrap();
         assert_eq!(outcome, PollOutcome::NotModified);
 
         let updated = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
@@ -486,7 +577,7 @@ mod tests {
         let feed_id = db::insert_feed(&conn, &url, None, None, 0).unwrap();
         let meta = db::get_feed_meta(&conn, feed_id).unwrap().unwrap();
 
-        let outcome = poll_feed(&conn, &meta).await.unwrap();
+        let outcome = poll_feed(&conn, &meta, &temp_store()).await.unwrap();
         match outcome {
             PollOutcome::Failed { error } => assert!(!error.is_empty()),
             other => panic!("expected Failed, got {other:?}"),
@@ -509,6 +600,7 @@ mod tests {
 
 #[cfg(test)]
 mod website_repair_tests {
+    use super::super::raw_store::temp_store;
     use super::*;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -555,8 +647,9 @@ mod website_repair_tests {
             .unwrap();
         db::update_feed_fetched(&conn, id, Some("\"v1\""), None, now_unix() + 86400).unwrap();
         let meta = db::get_feed_meta(&conn, id).unwrap().unwrap();
+        let raw_store = temp_store();
         assert_eq!(
-            poll_feed(&conn, &meta).await.unwrap(),
+            poll_feed(&conn, &meta, &raw_store).await.unwrap(),
             PollOutcome::Reconciled { new_item_count: 1 }
         );
         let rows = db::list_items(&conn, &db::ItemFilter::default(), 10, None).unwrap();
@@ -568,7 +661,7 @@ mod website_repair_tests {
         assert!(rows[1].published_at < meta.last_checked_at);
         let meta = db::get_feed_meta(&conn, id).unwrap().unwrap();
         assert_eq!(
-            poll_feed(&conn, &meta).await.unwrap(),
+            poll_feed(&conn, &meta, &raw_store).await.unwrap(),
             PollOutcome::NotModified
         );
         // New parser version marker prevents future automatic unconditional requests.
@@ -580,6 +673,7 @@ mod website_repair_tests {
 
 #[cfg(test)]
 mod collection_storage_tests {
+    use super::super::raw_store::temp_store;
     use super::*;
     use crate::commands::add_feed::store_feed;
 
@@ -599,14 +693,16 @@ mod collection_storage_tests {
             .unwrap();
             let meta = db::get_feed_meta(&conn, id).unwrap().unwrap();
             let incoming = crate::db::collection::tests::items(65);
+            let raw_store = temp_store();
             conn.execute_batch("CREATE TRIGGER reject_metadata BEFORE UPDATE OF etag ON feeds BEGIN SELECT RAISE(ABORT,'disk failure'); END").unwrap();
             let run = || {
                 apply_parsed(
                     &conn,
                     &meta,
                     Ok((incoming.clone(), None, vec![])),
-                    Some("new-etag".into()),
-                    None,
+                    b"",
+                    &raw_store,
+                    (Some("new-etag".into()), None),
                     100,
                 )
             };
@@ -641,6 +737,7 @@ mod collection_storage_tests {
 
 #[cfg(test)]
 mod collection_concurrency_tests {
+    use super::super::raw_store::temp_store;
     use super::*;
     use crate::commands::add_feed::store_feed;
 
@@ -666,12 +763,14 @@ mod collection_concurrency_tests {
         .unwrap();
         let meta = db::get_feed_meta(&conn, id).unwrap().unwrap();
         drop(conn);
+        let raw_store = temp_store();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let handles: Vec<_> = (0..2)
             .map(|_| {
                 let path = path.clone();
                 let barrier = barrier.clone();
                 let meta = meta.clone();
+                let raw_store = raw_store.clone();
                 std::thread::spawn(move || {
                     let conn = db::init(&path).unwrap();
                     barrier.wait();
@@ -679,8 +778,9 @@ mod collection_concurrency_tests {
                         &conn,
                         &meta,
                         Ok((crate::db::collection::tests::items(65), None, vec![])),
-                        Some("etag".into()),
-                        None,
+                        b"",
+                        &raw_store,
+                        (Some("etag".into()), None),
                         100,
                     )
                     .unwrap()

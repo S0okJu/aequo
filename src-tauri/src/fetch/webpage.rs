@@ -12,6 +12,12 @@ pub const PARSER_VERSION: i64 = 1;
 const HEADINGS: &str = "h1,h2,h3,h4,h5,h6,strong";
 const CARDS: &str = "article,.article-excerpt,.post-card,.blog-card,.post-item,.entry,.h-entry,[itemtype$='BlogPosting']";
 const META: &str = "[itemprop='datePublished'],.article-excerpt-meta,.post-meta,.entry-meta,.published,.post-date,.date";
+// `dd` too: a `<dl><dt>등록일</dt><dd>2026.11.19</dd></dl>` metadata list (seen on
+// d2.naver.com/helloworld) carries its date in an unclassed `<dd>`, not a
+// `<span>`/`<time>`. A non-date `<dd>` (e.g. a view count) alongside it is
+// harmless here - `visible_date`'s regex still has to match before it's
+// treated as one.
+const DATE_HINT: &str = "time,.post-date,.date,dd";
 
 pub struct WebpageListing {
     pub title: Option<String>,
@@ -55,7 +61,7 @@ fn card_for(node: NodeRef<'_>) -> Option<NodeRef<'_>> {
                     let s = selection(*n);
                     !s.is("body,html,main,section")
                         && !s.select(HEADINGS).is_empty()
-                        && !s.select("time,.post-date,.date").is_empty()
+                        && !s.select(DATE_HINT).is_empty()
                         && s.select("h1,h2,h3,h4,h5,h6,strong").nodes().len() == 1
                 })
         })
@@ -133,7 +139,7 @@ fn date_texts(card: NodeRef<'_>) -> Vec<String> {
             .collect();
     }
     // Kyverno featured card uses a direct span; do not scan headline/summary text.
-    s.select("span,time")
+    s.select("span,time,dd")
         .nodes()
         .iter()
         .filter(|n| {
@@ -499,6 +505,40 @@ mod listing_regressions {
             .find(|i| i.title.as_deref().unwrap().starts_with("4/18,"))
             .unwrap();
         assert_eq!(weekly.published_at, parse_date("2019-04-22").unwrap());
+    }
+    #[test]
+    fn a_dl_dt_dd_metadata_list_still_yields_real_dates() {
+        // d2.naver.com/helloworld puts each post's date in a plain,
+        // unclassed `<dd>` next to a view count - no `<time>`, `.date`, or
+        // similar class anywhere. Regression for DATE_HINT/date_texts not
+        // looking at `dd` at all.
+        let d2 = parse(
+            "https://d2.naver.com/helloworld",
+            include_bytes!("../../tests/fixtures/d2_naver_helloworld.html"),
+            1_800_000_000,
+        )
+        .unwrap();
+        let dated: Vec<_> = d2
+            .items
+            .iter()
+            .filter(|i| i.published_at_kind == "date")
+            .collect();
+        // The header's own "naver D2" home-link is a known, harmless
+        // false positive (an <h1>-wrapped site logo, not an article), so
+        // this allows for exactly one undated outlier rather than requiring
+        // every single item to have a real date.
+        assert!(
+            dated.len() >= d2.items.len() - 1,
+            "expected almost every item to have a real date, got {}/{}",
+            dated.len(),
+            d2.items.len()
+        );
+        let first_dated = d2
+            .items
+            .iter()
+            .find(|i| i.published_at_kind == "date")
+            .unwrap();
+        assert_eq!(first_dated.published_at, parse_date("2026.11.19").unwrap());
     }
     #[test]
     fn card_boundaries_headers_aliases_queries_and_ambiguous_dates() {

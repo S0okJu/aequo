@@ -26,3 +26,17 @@ if (typeof Element !== 'undefined' && !Element.prototype.animate) {
 if (typeof Element !== 'undefined' && !Element.prototype.getAnimations) {
   Element.prototype.getAnimations = () => [];
 }
+
+// jsdom doesn't implement <dialog>'s showModal/close at all (not even as a
+// no-op); the `open` attribute/property themselves already reflect
+// correctly, so a minimal shim is enough for components that drive a
+// native <dialog> (see AddFeedDialog.svelte, FeedSourceDialog.svelte).
+if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.showModal) {
+  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+    this.setAttribute('open', '');
+  };
+  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+    this.removeAttribute('open');
+    this.dispatchEvent(new Event('close'));
+  };
+}

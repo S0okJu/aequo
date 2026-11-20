@@ -9,6 +9,7 @@ use tauri::{AppHandle, State};
 
 use crate::db;
 use crate::events::emit_if_updated;
+use crate::fetch::raw_store::RawContentStore;
 use crate::fetch::worker::{self, PollOutcome};
 use crate::resource_policy::ResourcePolicy;
 
@@ -17,6 +18,7 @@ pub async fn refresh_feed(
     app: AppHandle,
     db_state: State<'_, Mutex<Connection>>,
     policy: State<'_, ResourcePolicy>,
+    raw_store: State<'_, RawContentStore>,
     feed_id: i64,
 ) -> Result<String, String> {
     let meta = {
@@ -28,7 +30,7 @@ pub async fn refresh_feed(
             .ok_or_else(|| format!("feed {feed_id} not found"))?
     };
 
-    let outcome = worker::poll_feed_locked(&db_state, &meta, &policy, true).await?;
+    let outcome = worker::poll_feed_locked(&db_state, &meta, &policy, true, &raw_store).await?;
     emit_if_updated(&app, feed_id, &outcome);
 
     match outcome {

@@ -84,6 +84,11 @@ jobs:
 
       - name: Build verification DMG without release secrets
         if: ${{ !inputs.signed_release }}
+        env:
+          # This build only verifies that the app builds and signs correctly, so it skips the
+          # expensive LTO + single-codegen-unit settings reserved for the real signed release.
+          CARGO_PROFILE_RELEASE_LTO: 'false'
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
         run: pnpm tauri build --target aarch64-apple-darwin --bundles app,dmg --ci -- --locked
 
       - name: Build signed release artifacts

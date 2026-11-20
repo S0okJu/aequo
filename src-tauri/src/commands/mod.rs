@@ -8,6 +8,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::db;
+use crate::fetch;
+use crate::fetch::raw_store::{FeedRawContent, RawContentStore};
 
 pub mod add_feed;
 pub mod ai;
@@ -110,6 +112,74 @@ pub fn get_item_summary(
     db::get_item_summary_by_id(&conn, item_id).map_err(|error| error.to_string())
 }
 
+/// The raw document behind a subscription as of its last successful
+/// poll - `None` if it hasn't completed one yet since this feature
+/// shipped (or ever, for a feed that only ever 404s/times out).
+///
+/// A `format = 'website'` feed never had a real feed document to begin
+/// with, so instead of the cached scraped HTML (confusing next to "View
+/// RSS feed"), this synthesizes one from its already-stored items -
+/// clearly marked as auto-generated so it's never mistaken for
+/// something the site actually serves.
+#[tauri::command]
+pub fn get_feed_raw_content(
+    db_state: State<'_, Mutex<Connection>>,
+    raw_store: State<'_, RawContentStore>,
+    feed_id: i64,
+) -> Result<Option<FeedRawContent>, String> {
+    let conn = db_state
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    feed_raw_content(&conn, &raw_store, feed_id)
+}
+
+/// Split out from the `#[tauri::command]` wrapper so it can be exercised
+/// directly in tests without needing a running Tauri app / managed state.
+fn feed_raw_content(
+    conn: &Connection,
+    raw_store: &RawContentStore,
+    feed_id: i64,
+) -> Result<Option<FeedRawContent>, String> {
+    let feed = db::get_feed_by_id(conn, feed_id).map_err(|e| e.to_string())?;
+    if let Some(feed) = feed.filter(|f| f.format.as_deref() == Some("website")) {
+        let items = db::list_items(
+            conn,
+            &db::ItemFilter {
+                feed_id: Some(feed_id),
+                ..Default::default()
+            },
+            100,
+            None,
+        )
+        .map_err(|e| e.to_string())?;
+        if items.is_empty() {
+            return Ok(None);
+        }
+        let fetched_at = items.iter().map(|item| item.fetched_at).max().unwrap_or(0);
+        let synthetic: Vec<_> = items
+            .iter()
+            .map(|item| fetch::synthetic_feed::SyntheticItem {
+                guid: &item.guid_hash,
+                title: item.title.as_deref(),
+                link: item.link.as_deref(),
+                summary: item.preview.as_deref(),
+                published_at: item.published_at,
+                published_at_kind: &item.published_at_kind,
+            })
+            .collect();
+        let title = feed
+            .custom_title
+            .as_deref()
+            .or(feed.title.as_deref())
+            .unwrap_or(&feed.url);
+        return Ok(Some(FeedRawContent {
+            content: fetch::synthetic_feed::build(title, &feed.url, &synthetic),
+            fetched_at,
+        }));
+    }
+    raw_store.read(feed_id).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn mark_read(db_state: State<'_, Mutex<Connection>>, item_id: i64) -> Result<(), String> {
     let conn = db_state
@@ -188,6 +258,7 @@ fn now_unix() -> i64 {
 pub fn delete_feed(
     app: AppHandle,
     db_state: State<'_, Mutex<Connection>>,
+    raw_store: State<'_, RawContentStore>,
     feed_id: i64,
 ) -> Result<(), String> {
     let conn = db_state
@@ -195,6 +266,7 @@ pub fn delete_feed(
         .map_err(|_| "database lock poisoned".to_string())?;
     let deleted = db::delete_feed(&conn, feed_id).map_err(|e| e.to_string())?;
     if deleted {
+        raw_store.delete(feed_id);
         let _ = app.emit(
             "feed-icon-updated",
             crate::icons::FeedIconUpdatedPayload { feed_id },
@@ -336,5 +408,98 @@ pub fn set_feed_refresh_interval(
         Ok(())
     } else {
         Err(format!("feed {feed_id} not found"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::NewItem;
+    use crate::fetch::raw_store::temp_store;
+
+    fn item(guid: &str, title: &str, published_at: i64) -> NewItem {
+        NewItem {
+            guid_hash: guid.to_string(),
+            title: Some(title.to_string()),
+            link: Some(format!("https://example.com/{guid}")),
+            summary: Some("A summary".to_string()),
+            full_content: None,
+            published_at,
+            published_at_kind: "date",
+            fetched_at: published_at,
+        }
+    }
+
+    #[test]
+    fn a_website_feed_gets_a_synthesized_auto_generated_rss_feed_instead_of_its_cached_html() {
+        let conn = db::init_in_memory().unwrap();
+        let feed_id = db::insert_feed(
+            &conn,
+            "https://example.com/",
+            Some("Example"),
+            Some("website"),
+            1000,
+        )
+        .unwrap();
+        db::upsert_items(
+            &conn,
+            feed_id,
+            &[
+                item("a", "First Post", 2000),
+                item("b", "Second Post", 1000),
+            ],
+        )
+        .unwrap();
+        let store = temp_store();
+        // The scraped HTML is cached too (worker.rs always caches it for
+        // website-repair), but it must not be what this returns.
+        store
+            .write(feed_id, b"<html><body>irrelevant</body></html>")
+            .unwrap();
+
+        let raw = feed_raw_content(&conn, &store, feed_id).unwrap().unwrap();
+        assert!(raw.content.contains("Auto-generated by Aequo"));
+        assert!(raw.content.contains("<title>First Post</title>"));
+        assert!(raw.content.contains("<title>Second Post</title>"));
+        assert!(!raw.content.contains("irrelevant"));
+        assert_eq!(raw.fetched_at, 2000);
+
+        let parsed = fetch::parser::parse(raw.content.as_bytes()).unwrap();
+        assert_eq!(parsed.entries.len(), 2);
+    }
+
+    #[test]
+    fn a_website_feed_with_no_items_yet_has_no_source_to_show() {
+        let conn = db::init_in_memory().unwrap();
+        let feed_id =
+            db::insert_feed(&conn, "https://example.com/", None, Some("website"), 1000).unwrap();
+        let store = temp_store();
+        assert_eq!(feed_raw_content(&conn, &store, feed_id).unwrap(), None);
+    }
+
+    #[test]
+    fn a_real_feed_still_returns_its_cached_source_unchanged() {
+        let conn = db::init_in_memory().unwrap();
+        let feed_id = db::insert_feed(
+            &conn,
+            "https://example.com/feed.xml",
+            None,
+            Some("rss"),
+            1000,
+        )
+        .unwrap();
+        let store = temp_store();
+        store
+            .write(
+                feed_id,
+                b"<rss><channel><title>Real</title></channel></rss>",
+            )
+            .unwrap();
+
+        let raw = feed_raw_content(&conn, &store, feed_id).unwrap().unwrap();
+        assert_eq!(
+            raw.content,
+            "<rss><channel><title>Real</title></channel></rss>"
+        );
     }
 }

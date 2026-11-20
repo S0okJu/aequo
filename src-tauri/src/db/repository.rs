@@ -306,7 +306,6 @@ pub fn update_feed_interval(
     )? > 0)
 }
 
-#[cfg(test)]
 pub fn get_feed_by_id(conn: &Connection, feed_id: i64) -> Result<Option<Feed>> {
     conn.query_row(
         &format!("SELECT {FEED_COLUMNS} FROM feeds WHERE id = ?1"),
