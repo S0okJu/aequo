@@ -414,13 +414,13 @@
                   <div class="confirm-actions">
                     <button
                       type="button"
-                      class="ui-action ui-action--secondary"
+                      class="small ui-action ui-action--secondary"
                       onclick={() => (confirmingDeleteFolderId = null)}
                       >{t('common.cancel')}</button
                     >
                     <button
                       type="button"
-                      class="confirm-remove ui-action ui-action--secondary"
+                      class="small confirm-remove ui-action ui-action--secondary"
                       disabled={folderBusy}
                       onclick={() => confirmDeleteFolder(folder)}
                       >{folderBusy ? t('subs.deleting') : t('common.delete')}</button
@@ -656,13 +656,13 @@
               <div class="confirm-actions">
                 <button
                   type="button"
-                  class="ui-action ui-action--secondary"
+                  class="small ui-action ui-action--secondary"
                   onclick={() => (confirmingUnsubscribe = false)}
                   >{t('common.cancel')}</button
                 >
                 <button
                   type="button"
-                  class="confirm-remove ui-action ui-action--secondary"
+                  class="small confirm-remove ui-action ui-action--secondary"
                   disabled={removing}
                   onclick={() => unsubscribe(feed)}
                   >{removing ? t('subs.removing') : t('subs.unsubscribe')}</button
@@ -911,7 +911,10 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-    padding: var(--space-1) var(--space-2) 0;
+    padding: var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-secondary);
     color: var(--color-text);
     font-size: var(--text-small);
   }
@@ -926,6 +929,10 @@
   .confirm-remove {
     color: var(--color-error);
     border-color: color-mix(in srgb, var(--color-error) 35%, var(--color-border));
+  }
+
+  .confirm-remove:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-error) 10%, var(--color-bg));
   }
 
   .detail {
