@@ -70,6 +70,35 @@ export function stripSyndicationFooter(text: string | null | undefined): string 
   return stripped || null;
 }
 
+/**
+ * A short tag for a feed's detected format, shown next to its name. Only
+ * 'website' (no real feed found, so the homepage got scraped instead) gets
+ * one - a real feed needs no label, scraping does.
+ */
+export function feedFormatBadge(format: string | null): string | null {
+  return format === 'website' ? t('subs.formatWebsite') : null;
+}
+
+/**
+ * The "view raw source" action's label. A 'website' feed has no real feed
+ * document of its own, but the backend now synthesizes one from its stored
+ * items (see `get_feed_raw_content`), so it reads as RSS here too - the
+ * dialog's auto-generated notice is what actually marks the difference.
+ */
+export function feedSourceLabel(format: string | null): string {
+  switch (format) {
+    case 'rss':
+    case 'website':
+      return t('subs.viewSourceRss');
+    case 'atom':
+      return t('subs.viewSourceAtom');
+    case 'json_feed':
+      return t('subs.viewSourceJson');
+    default:
+      return t('subs.viewSource');
+  }
+}
+
 /** Whether a feed's last refresh failed; the sidebar and its footer agree on this. */
 export function feedHasError(feed: {
   lastError: string | null;

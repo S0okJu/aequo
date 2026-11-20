@@ -1,6 +1,7 @@
 <script lang="ts">
   import { SvelteSet } from 'svelte/reactivity';
   import { fly } from 'svelte/transition';
+  import FeedFormatBadge from '../FeedFormatBadge.svelte';
   import FeedIcon from '../FeedIcon.svelte';
   import FeedSourceDialog from './FeedSourceDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
@@ -16,7 +17,7 @@
     setFeedRefreshInterval,
     updateFeedOrganization,
   } from '$lib/api';
-  import { feedDisplayName, formatDateTime } from '$lib/format';
+  import { feedDisplayName, feedSourceLabel, formatDateTime } from '$lib/format';
   import { t } from '$lib/i18n/index.svelte';
   import { rise } from '$lib/motion';
   import type { FeedFolder, FeedSummary } from '$lib/types';
@@ -284,6 +285,7 @@
   >
     <FeedIcon {feed} />
     <span class="feed-name">{feedDisplayName(feed)}</span>
+    <FeedFormatBadge format={feed.format} />
     {#if hasError(feed)}
       <span class="feed-error" role="img" aria-label={t('subs.needsAttention')}
         ><Icon name="error" size={12} /></span
@@ -519,6 +521,7 @@
         <header class="detail-header">
           <FeedIcon {feed} size={20} />
           <h2 id="feed-detail-title">{feedDisplayName(feed)}</h2>
+          <FeedFormatBadge format={feed.format} />
           <IconButton icon="close" label={t('subs.closeDetail')} onclick={closeDetail} />
         </header>
 
@@ -645,7 +648,7 @@
             <button
               type="button"
               class="small ui-action ui-action--secondary"
-              onclick={() => (sourceDialogOpen = true)}>{t('subs.viewSource')}</button
+              onclick={() => (sourceDialogOpen = true)}>{feedSourceLabel(feed.format)}</button
             >
             {#if !confirmingUnsubscribe}
               <button
@@ -682,6 +685,7 @@
   open={sourceDialogOpen}
   feedId={selected?.id ?? null}
   feedName={selected ? feedDisplayName(selected) : ''}
+  format={selected?.format ?? null}
   onClose={() => (sourceDialogOpen = false)}
 />
 

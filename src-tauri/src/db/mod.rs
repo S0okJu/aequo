@@ -23,8 +23,8 @@ pub use models::{
 pub use repository::{
     annotations_overlapping, count_unread, count_unread_items, create_annotation,
     create_feed_folder, delete_ai_session, delete_annotation, delete_feed, delete_feed_folder,
-    feeds_needing_icons, get_ai_session, get_annotation, get_feed_meta, get_item_summary_by_id,
-    get_reader_article_cache, get_reader_item, get_retention_settings,
+    feeds_needing_icons, get_ai_session, get_annotation, get_feed_by_id, get_feed_meta,
+    get_item_summary_by_id, get_reader_article_cache, get_reader_item, get_retention_settings,
     guid_hashes_with_full_content, insert_feed, list_ai_sessions, list_annotations,
     list_due_feed_metas, list_feed_folders, list_feed_icons, list_feed_metas, list_feeds,
     list_items, list_newer_items, mark_items_read, mark_items_unread, mark_read,
@@ -36,7 +36,7 @@ pub use repository::{
 };
 
 #[cfg(test)]
-pub use repository::{get_article_cache, get_feed_by_id, get_item_by_id, upsert_items};
+pub use repository::{get_article_cache, get_item_by_id, upsert_items};
 
 #[cfg(test)]
 pub use connection::init_in_memory;
