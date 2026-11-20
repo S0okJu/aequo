@@ -8,6 +8,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::db;
+use crate::fetch::raw_store::{FeedRawContent, RawContentStore};
 
 pub mod add_feed;
 pub mod ai;
@@ -110,6 +111,17 @@ pub fn get_item_summary(
     db::get_item_summary_by_id(&conn, item_id).map_err(|error| error.to_string())
 }
 
+/// The raw document behind a subscription as of its last successful
+/// poll - `None` if it hasn't completed one yet since this feature
+/// shipped (or ever, for a feed that only ever 404s/times out).
+#[tauri::command]
+pub fn get_feed_raw_content(
+    raw_store: State<'_, RawContentStore>,
+    feed_id: i64,
+) -> Result<Option<FeedRawContent>, String> {
+    raw_store.read(feed_id).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn mark_read(db_state: State<'_, Mutex<Connection>>, item_id: i64) -> Result<(), String> {
     let conn = db_state
@@ -188,6 +200,7 @@ fn now_unix() -> i64 {
 pub fn delete_feed(
     app: AppHandle,
     db_state: State<'_, Mutex<Connection>>,
+    raw_store: State<'_, RawContentStore>,
     feed_id: i64,
 ) -> Result<(), String> {
     let conn = db_state
@@ -195,6 +208,7 @@ pub fn delete_feed(
         .map_err(|_| "database lock poisoned".to_string())?;
     let deleted = db::delete_feed(&conn, feed_id).map_err(|e| e.to_string())?;
     if deleted {
+        raw_store.delete(feed_id);
         let _ = app.emit(
             "feed-icon-updated",
             crate::icons::FeedIconUpdatedPayload { feed_id },

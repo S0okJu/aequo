@@ -2,6 +2,7 @@
   import { SvelteSet } from 'svelte/reactivity';
   import { fly } from 'svelte/transition';
   import FeedIcon from '../FeedIcon.svelte';
+  import FeedSourceDialog from './FeedSourceDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import IconButton from '../IconButton.svelte';
   import ErrorCard from '../ErrorCard.svelte';
@@ -105,6 +106,7 @@
   let confirmingUnsubscribe = $state(false);
   let removing = $state(false);
   let copied = $state(false);
+  let sourceDialogOpen = $state(false);
 
   // Reset per-feed editing state when another feed is selected.
   $effect(() => {
@@ -113,6 +115,7 @@
     saveStatus = null;
     confirmingUnsubscribe = false;
     copied = false;
+    sourceDialogOpen = false;
   });
 
   const nameDirty = $derived(
@@ -639,6 +642,11 @@
               onclick={() => refreshSelected(feed)}
               >{refreshing.has(feed.id) ? t('subs.refreshing') : t('subs.refreshNow')}</button
             >
+            <button
+              type="button"
+              class="small ui-action ui-action--secondary"
+              onclick={() => (sourceDialogOpen = true)}>{t('subs.viewSource')}</button
+            >
             {#if !confirmingUnsubscribe}
               <button
                 type="button"
@@ -669,6 +677,13 @@
     {/if}
   </div>
 </div>
+
+<FeedSourceDialog
+  open={sourceDialogOpen}
+  feedId={selected?.id ?? null}
+  feedName={selected ? feedDisplayName(selected) : ''}
+  onClose={() => (sourceDialogOpen = false)}
+/>
 
 <style>
   .subscriptions-shell {

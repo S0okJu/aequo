@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   createFeedFolder: vi.fn(),
   deleteFeed: vi.fn(),
   deleteFeedFolder: vi.fn(),
+  getFeedRawContent: vi.fn(),
   refreshFeed: vi.fn(),
   renameFeed: vi.fn(),
   renameFeedFolder: vi.fn(),
@@ -116,6 +117,32 @@ describe('SettingsSubscriptions', () => {
       within(confirm as HTMLElement).getByRole('button', { name: 'Unsubscribe' }),
     );
     expect(api.deleteFeed).toHaveBeenCalledWith(11);
+  });
+
+  it("shows the feed's last-fetched raw content in a dialog", async () => {
+    api.getFeedRawContent.mockResolvedValue({
+      content: '<rss><channel><title>Beta News</title></channel></rss>',
+      fetchedAt: 1_700_000_000,
+    });
+    renderList();
+    await fireEvent.click(screen.getByRole('button', { name: /Beta News/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'View source' }));
+    expect(api.getFeedRawContent).toHaveBeenCalledWith(11);
+
+    const dialog = await screen.findByRole('heading', { name: /Source · Beta News/ });
+    expect(
+      within(dialog.closest('dialog')!).getByText(
+        '<rss><channel><title>Beta News</title></channel></rss>',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('shows an empty state when a feed has no stored source yet', async () => {
+    api.getFeedRawContent.mockResolvedValue(null);
+    renderList();
+    await fireEvent.click(screen.getByRole('button', { name: /Beta News/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'View source' }));
+    expect(await screen.findByText(/No source is stored yet/)).toBeTruthy();
   });
 
   it('creates folders, rejecting duplicate names', async () => {

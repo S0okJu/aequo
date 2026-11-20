@@ -26,6 +26,12 @@ export interface FeedSummary {
   pinned: boolean;
 }
 
+/** The document behind a subscription as of its last successful poll. */
+export interface FeedRawContent {
+  content: string;
+  fetchedAt: number;
+}
+
 export type ResourceMode = 'light' | 'balanced' | 'fast' | 'custom';
 
 export interface ResourceSettings {

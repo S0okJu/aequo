@@ -10,5 +10,6 @@ pub mod favicon;
 pub mod hydration;
 pub mod parser;
 mod raw_content;
+pub mod raw_store;
 pub mod webpage;
 pub mod worker;

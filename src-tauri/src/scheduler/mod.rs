@@ -18,6 +18,7 @@ use tokio::time::{Instant, sleep_until};
 
 use crate::db;
 use crate::events::emit_if_updated;
+use crate::fetch::raw_store::RawContentStore;
 use crate::fetch::worker::{self, PollOutcome};
 use crate::resource_policy::{ResourcePolicy, effective_due_at};
 
@@ -45,6 +46,7 @@ fn now_unix() -> i64 {
 /// size.
 pub async fn poll_due_feeds<R: Runtime>(conn: Arc<Mutex<Connection>>, app: AppHandle<R>) -> usize {
     let policy = app.state::<ResourcePolicy>().inner().clone();
+    let raw_store = app.state::<RawContentStore>().inner().clone();
     let due = {
         let guard = conn.lock().expect("database lock poisoned");
         db::list_due_feed_metas(&guard, now_unix())
@@ -68,13 +70,14 @@ pub async fn poll_due_feeds<R: Runtime>(conn: Arc<Mutex<Connection>>, app: AppHa
         }
         let conn = conn.clone();
         let policy = policy.clone();
+        let raw_store = raw_store.clone();
         set.spawn(async move {
             let feed_id = meta.id;
             let url = meta.url.clone();
             (
                 feed_id,
                 url,
-                worker::poll_feed_locked(&conn, &meta, &policy, false).await,
+                worker::poll_feed_locked(&conn, &meta, &policy, false, &raw_store).await,
             )
         });
     }
@@ -185,6 +188,7 @@ mod tests {
             .unwrap(),
         });
         app.manage(policy);
+        app.manage(crate::fetch::raw_store::temp_store());
         app.handle().clone()
     }
 
