@@ -164,6 +164,7 @@ fn feed_raw_content(
                 link: item.link.as_deref(),
                 summary: item.preview.as_deref(),
                 published_at: item.published_at,
+                published_at_kind: &item.published_at_kind,
             })
             .collect();
         let title = feed
