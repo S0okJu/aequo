@@ -150,53 +150,6 @@
   let contextRequestKey = 0;
   let aiPaneElement = $state<HTMLElement | undefined>(undefined);
 
-  async function openContext(
-    contextItems: Item[],
-    scopeLabel: string | null = null,
-    add = false,
-    scopeFilter: ItemFilter | null = null,
-  ) {
-    if (contextItems.length === 0) return;
-    aiContextRequest = {
-      key: ++contextRequestKey,
-      items: contextItems,
-      scopeLabel,
-      scopeFilter,
-      add,
-    };
-    aiPanelOpen = true;
-  }
-  async function askView() {
-    const filter = currentFilter();
-    try {
-      const articles = await listItems(filter, 20);
-      const label =
-        searchQuery ||
-        feeds.find((f) => f.id === selectedFeedId)?.title ||
-        folders.find((f) => f.id === selectedFolderId)?.name ||
-        t(
-          selectedToday
-            ? 'posts.label.today'
-            : selectedStarred
-              ? 'posts.label.starred'
-              : 'posts.label.all',
-        );
-      const icon = selectedToday
-        ? '◷'
-        : selectedStarred
-          ? '★'
-          : selectedFolderId
-            ? '▱'
-            : selectedFeedId
-              ? '◉'
-              : searchQuery
-                ? '⌕'
-                : '▤';
-      await openContext(articles, `${icon} ${label}`, false, filter);
-    } catch (error) {
-      showToast(String(error), { type: 'error' });
-    }
-  }
   async function openContextItem(id: number) {
     try {
       const post = await getItemSummary(id);
@@ -1130,7 +1083,6 @@
     {#key `${selectedFeedId}-${selectedFolderId}-${selectedToday}-${selectedStarred}`}
       <PostsFeed
         {items}
-        onAskView={askView}
         {feeds}
         {folders}
         loading={initialLoading}

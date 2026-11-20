@@ -22,7 +22,6 @@
 
   interface Props {
     items: Item[];
-    onAskView?: () => void;
     feeds: FeedSummary[];
     folders: FeedFolder[];
     loading?: boolean;
@@ -57,7 +56,6 @@
 
   let {
     items,
-    onAskView,
     feeds,
     folders,
     loading = false,
@@ -401,13 +399,6 @@
           <h2 class="view-title" title={viewTitle}>
             <span class="visually-hidden">{viewLabel}: </span>{viewTitle}
           </h2>
-          {#if onAskView}<button
-              type="button"
-              class="ask-view ui-action"
-              aria-label={t('posts.askView')}
-              title={t('posts.askView')}
-              onclick={onAskView}><Icon name="ask-ai" size={13} />{t('posts.askViewAction')}</button
-            >{/if}
         </div>
 
         <div class="tools">
