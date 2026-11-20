@@ -2368,9 +2368,6 @@
     flex-shrink: 0;
     gap: var(--space-1);
   }
-  .confirm-actions button.confirm-remove {
-    color: var(--color-error);
-  }
   .provider-switch-confirm {
     border-bottom: 1px solid var(--color-border);
     background: var(--color-bg-secondary);

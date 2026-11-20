@@ -412,15 +412,12 @@
                 <div class="confirm-row">
                   <span>{t('subs.deleteFolderConfirm', { name: folder.name, count })}</span>
                   <div class="confirm-actions">
-                    <button
-                      type="button"
-                      class="small ui-action ui-action--secondary"
-                      onclick={() => (confirmingDeleteFolderId = null)}
+                    <button type="button" onclick={() => (confirmingDeleteFolderId = null)}
                       >{t('common.cancel')}</button
                     >
                     <button
                       type="button"
-                      class="small confirm-remove ui-action ui-action--secondary"
+                      class="confirm-remove"
                       disabled={folderBusy}
                       onclick={() => confirmDeleteFolder(folder)}
                       >{folderBusy ? t('subs.deleting') : t('common.delete')}</button
@@ -654,15 +651,12 @@
             <div class="confirm-row">
               <span>{t('subs.unsubscribeConfirm', { name: feedDisplayName(feed) })}</span>
               <div class="confirm-actions">
-                <button
-                  type="button"
-                  class="small ui-action ui-action--secondary"
-                  onclick={() => (confirmingUnsubscribe = false)}
+                <button type="button" onclick={() => (confirmingUnsubscribe = false)}
                   >{t('common.cancel')}</button
                 >
                 <button
                   type="button"
-                  class="small confirm-remove ui-action ui-action--secondary"
+                  class="confirm-remove"
                   disabled={removing}
                   onclick={() => unsubscribe(feed)}
                   >{removing ? t('subs.removing') : t('subs.unsubscribe')}</button
@@ -905,34 +899,6 @@
     margin: 0 var(--space-2) var(--space-1);
     color: var(--color-error);
     font-size: var(--text-small);
-  }
-
-  .confirm-row {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    padding: var(--space-3);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-bg-secondary);
-    color: var(--color-text);
-    font-size: var(--text-small);
-  }
-
-  .confirm-actions {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: var(--space-2);
-  }
-
-  .confirm-remove {
-    color: var(--color-error);
-    border-color: color-mix(in srgb, var(--color-error) 35%, var(--color-border));
-  }
-
-  .confirm-remove:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--color-error) 10%, var(--color-bg));
   }
 
   .detail {

@@ -252,10 +252,6 @@
     justify-content: flex-end;
     gap: var(--space-2);
   }
-  .confirm-remove {
-    color: var(--color-error);
-    border-color: color-mix(in srgb, var(--color-error) 35%, var(--color-border));
-  }
   .saving {
     color: var(--color-text-secondary);
     font-size: var(--text-small);
